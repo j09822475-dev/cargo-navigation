@@ -21,7 +21,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      - name: Принять лицензии Android SDK (SDK предустановлен на раннере)
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       - name: Сборка debug APK
         working-directory: android
