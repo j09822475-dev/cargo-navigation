@@ -33,11 +33,35 @@ jobs:
       - name: Тесты (маршрутизатор, дальние маршруты, навигация, UI)
         run: flutter test
 
+      - name: Ключ подписи из GitHub Secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::Секреты подписи не заданы: APK подписан временным ключом и не обновится поверх установленного. См. README, раздел «Ключ подписи»."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+
       - name: Сборка APK
-        run: flutter build apk --release
+        run: flutter build apk --release --build-number=${{ github.run_number }} --build-name=1.0.${{ github.run_number }}
 
       - name: Подготовить файл для релиза
         run: cp build/app/outputs/flutter-apk/app-release.apk cargo-navigation.apk
+
+      - name: Отпечаток подписи (должен совпадать во всех сборках)
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          "$APKSIGNER" verify --print-certs cargo-navigation.apk | grep -i "SHA-256" || true
 
       - uses: actions/upload-artifact@v4
         with:
