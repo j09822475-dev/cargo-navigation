@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -32,3 +34,17 @@ jobs:
         with:
           name: cargo-navigation-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Подготовить файл для релиза
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk cargo-navigation.apk
+
+      - name: Опубликовать APK в GitHub Releases
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          target_commitish: ${{ github.sha }}
+          name: Cargo Navigation (последняя сборка)
+          body: Debug-сборка Android-приложения. Установка из неизвестных источников.
+          prerelease: true
+          files: cargo-navigation.apk
