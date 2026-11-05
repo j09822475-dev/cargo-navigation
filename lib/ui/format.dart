@@ -16,10 +16,15 @@ String _group(int v) {
   final s = v.abs().toString();
   final b = StringBuffer();
   for (var i = 0; i < s.length; i++) {
-    if (i > 0 && (s.length - i) % 3 == 0) b.write(' ');
+    if (i > 0 && (s.length - i) % 3 == 0) b.write('\u00A0');
     b.write(s[i]);
   }
-  return (v < 0 ? '-' : '') + b.toString();
+  return b.toString();
 }
 
-String fmtMoney(double v, String currency) => '${_group(v.round())} $currency';
+/// Сумма в евро: «12,50 €».
+String fmtMoney(double v) {
+  final cents = (v * 100).round();
+  final whole = cents ~/ 100, frac = cents % 100;
+  return '${_group(whole)},${frac.toString().padLeft(2, '0')}\u00A0€';
+}

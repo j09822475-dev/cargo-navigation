@@ -25,14 +25,22 @@ enum TollMode {
   const TollMode(this.label);
 }
 
+/// Что важнее. Денежной цены времени нет: «быстрее» — минимум времени (платные только при выигрыше во времени),
+/// «дешевле» — минимум платных дорог (из равных по стоимости — самый быстрый).
+enum Priority {
+  fastest('Быстрее'),
+  cheapest('Дешевле');
+
+  final String label;
+  const Priority(this.label);
+}
+
 class RoutePrefs {
   Set<int> classes;
   double minSpeed, maxSpeed, vehicleMax;
   TollMode tollMode;
-  double valueOfTime; // стоимость часа времени
-  double tollHigh, tollLow, tollEntry; // за км на магистралях/шоссе, на прочих, за въезд
-  double fuelPer100, fuelPrice;
-  String currency;
+  Priority priority;
+  double tollHigh, tollLow, tollEntry; // € за км на магистралях/шоссе, на прочих, за въезд
   double accessRadius; // м у старта/финиша, где фильтры не действуют
   double preferPenalty; // во сколько раз «дороже» бесплатные дороги в режиме prefer
 
@@ -42,13 +50,10 @@ class RoutePrefs {
     this.maxSpeed = 200,
     this.vehicleMax = 110,
     this.tollMode = TollMode.any,
-    this.valueOfTime = 300,
-    this.tollHigh = 4,
-    this.tollLow = 3,
+    this.priority = Priority.fastest,
+    this.tollHigh = 0.10,
+    this.tollLow = 0.07,
     this.tollEntry = 0,
-    this.fuelPer100 = 8,
-    this.fuelPrice = 60,
-    this.currency = '₽',
     this.accessRadius = 800,
     this.preferPenalty = 2.5,
   }) : classes = classes ?? {for (var i = 0; i < roadClasses.length; i++) i};
@@ -63,13 +68,10 @@ class RoutePrefs {
         'maxSpeed': maxSpeed,
         'vehicleMax': vehicleMax,
         'tollMode': tollMode.name,
-        'valueOfTime': valueOfTime,
+        'priority': priority.name,
         'tollHigh': tollHigh,
         'tollLow': tollLow,
         'tollEntry': tollEntry,
-        'fuelPer100': fuelPer100,
-        'fuelPrice': fuelPrice,
-        'currency': currency,
         'accessRadius': accessRadius,
         'preferPenalty': preferPenalty,
       };
@@ -82,13 +84,10 @@ class RoutePrefs {
       maxSpeed: d('maxSpeed', 200),
       vehicleMax: d('vehicleMax', 110),
       tollMode: TollMode.values.firstWhere((m) => m.name == j['tollMode'], orElse: () => TollMode.any),
-      valueOfTime: d('valueOfTime', 300),
-      tollHigh: d('tollHigh', 4),
-      tollLow: d('tollLow', 3),
+      priority: Priority.values.firstWhere((m) => m.name == j['priority'], orElse: () => Priority.fastest),
+      tollHigh: d('tollHigh', 0.10),
+      tollLow: d('tollLow', 0.07),
       tollEntry: d('tollEntry', 0),
-      fuelPer100: d('fuelPer100', 8),
-      fuelPrice: d('fuelPrice', 60),
-      currency: (j['currency'] as String?) ?? '₽',
       accessRadius: d('accessRadius', 800),
       preferPenalty: d('preferPenalty', 2.5),
     );

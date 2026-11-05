@@ -15,7 +15,7 @@ class AppState extends ChangeNotifier {
 
   final PlanFn _plan;
   final VoidCallback? cancel;
-  static const _prefsKey = 'route_prefs_v2';
+  static const _prefsKey = 'route_prefs_v3';
 
   RoutePrefs prefs = RoutePrefs();
   LatLon? start, end;

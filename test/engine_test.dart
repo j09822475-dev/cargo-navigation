@@ -135,7 +135,7 @@ void main() {
     final src = FakeSource(longNetwork());
     final engine = RoutingEngine(src);
     final progress = <String>[];
-    final out = await engine.plan(longStart, longEnd, RoutePrefs(valueOfTime: 3000), onProgress: progress.add);
+    final out = await engine.plan(longStart, longEnd, RoutePrefs(priority: Priority.fastest), onProgress: progress.add);
     expect(out.error, isNull);
     expect(out.distanceKm, greaterThan(1400));
     final best = out.routes!.first;
@@ -159,7 +159,7 @@ void main() {
   test('дальний маршрут: «только бесплатные» расширяет каркас до главных дорог', () async {
     final src = FakeSource(longNetwork());
     final engine = RoutingEngine(src);
-    final out = await engine.plan(longStart, longEnd, RoutePrefs(valueOfTime: 3000, tollMode: TollMode.free));
+    final out = await engine.plan(longStart, longEnd, RoutePrefs(priority: Priority.fastest, tollMode: TollMode.free));
     expect(out.error, isNull, reason: out.error);
     expect(out.routes!.first.tollCost, 0);
     expect(src.calls.any((c) => c.kind == 'corridor' && c.classes.contains(2)), isTrue);
@@ -168,9 +168,9 @@ void main() {
   test('дальний маршрут: смена настроек не перезагружает данные', () async {
     final src = FakeSource(longNetwork());
     final engine = RoutingEngine(src);
-    await engine.plan(longStart, longEnd, RoutePrefs(valueOfTime: 3000));
+    await engine.plan(longStart, longEnd, RoutePrefs(priority: Priority.fastest));
     final n = src.calls.length;
-    final out = await engine.plan(longStart, longEnd, RoutePrefs(valueOfTime: 10));
+    final out = await engine.plan(longStart, longEnd, RoutePrefs(priority: Priority.cheapest));
     expect(out.routes, isNotNull);
     expect(src.calls.length, n);
   });

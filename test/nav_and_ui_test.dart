@@ -13,7 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 RouteData demoRoute() {
   final g = RoadGraph.build([waysFromSpecs(demoSpecs())]);
-  final res = planRoutes(g, demoStart, demoEnd, RoutePrefs(valueOfTime: 3000));
+  final res = planRoutes(g, demoStart, demoEnd, RoutePrefs(priority: Priority.fastest));
   return buildRouteData(g, res.routes!.first);
 }
 
@@ -25,7 +25,9 @@ void main() {
     expect(fmtTime(26.5), '1 д 2 ч 30 мин');
     expect(fmtDist(1530), '1.5 км');
     expect(fmtDist(250), '250 м');
-    expect(fmtMoney(12345, '₽'), '12 345 ₽');
+    expect(fmtMoney(12345.5), '12\u00A0345,50\u00A0€');
+    expect(fmtMoney(4.9), '4,90\u00A0€');
+    expect(fmtMoney(0), '0,00\u00A0€');
   });
 
   test('навигация: прогресс по маршруту до прибытия', () {
@@ -81,7 +83,7 @@ void main() {
     await tester.drag(find.text('Построить маршрут'), const Offset(0, -900));
     await tester.pumpAndSettle();
     expect(find.textContaining('Самый быстрый'), findsWidgets);
-    expect(find.textContaining('Оптимальный для ваших настроек'), findsOneWidget);
+    expect(find.textContaining('По вашему приоритету'), findsOneWidget);
     expect(find.text('Поехали'), findsOneWidget);
   });
 }

@@ -396,16 +396,14 @@ class _HomePageState extends State<HomePage> {
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SegmentedButton<double>(
+      SegmentedButton<Priority>(
         showSelectedIcon: false,
-        emptySelectionAllowed: true,
         segments: const [
-          ButtonSegment(value: 5000, label: Text('Быстрее', maxLines: 1), icon: Icon(Icons.bolt, size: 18)),
-          ButtonSegment(value: 300, label: Text('Баланс', maxLines: 1), icon: Icon(Icons.balance, size: 18)),
-          ButtonSegment(value: 0, label: Text('Дешевле', maxLines: 1), icon: Icon(Icons.savings, size: 18)),
+          ButtonSegment(value: Priority.fastest, label: Text('Быстрее', maxLines: 1), icon: Icon(Icons.bolt, size: 18)),
+          ButtonSegment(value: Priority.cheapest, label: Text('Дешевле', maxLines: 1), icon: Icon(Icons.savings, size: 18)),
         ],
-        selected: {if ([5000.0, 300.0, 0.0].contains(p.valueOfTime)) p.valueOfTime},
-        onSelectionChanged: (v) => apply(() => p.valueOfTime = v.first),
+        selected: {p.priority},
+        onSelectionChanged: (v) => apply(() => p.priority = v.first),
       ),
       const SizedBox(height: 8),
       SegmentedButton<TollMode>(
@@ -424,10 +422,9 @@ class _HomePageState extends State<HomePage> {
   Widget _routeCard(int i) {
     final r = s.routes[i];
     final fast = s.routes.reduce((a, b) => b.hours < a.hours ? b : a);
-    final cur = s.prefs.currency;
     final selected = i == s.selected;
     final scheme = Theme.of(context).colorScheme;
-    const tagNames = {'best': 'Оптимальный для ваших настроек', 'fastest': 'Самый быстрый', 'cheapest': 'Самый дешёвый'};
+    const tagNames = {'best': 'По вашему приоритету', 'fastest': 'Самый быстрый', 'cheapest': 'Меньше платных дорог'};
     const tagOrder = ['best', 'fastest', 'cheapest'];
     return Card(
       margin: const EdgeInsets.only(top: 10),
@@ -452,17 +449,16 @@ class _HomePageState extends State<HomePage> {
             ]),
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text(fmtTime(r.hours), style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-              Text(fmtMoney(r.money, cur), style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+              Text(r.tollCost > 0 ? fmtMoney(r.tollCost) : 'Бесплатно', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
             ]),
             Text('${fmtDist(r.meters)}${identical(r, fast) ? '' : ' · +${fmtTime(r.hours - fast.hours)} к самому быстрому'}',
                 style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 2),
             Text.rich(TextSpan(children: [
               if (r.tollMeters > 0)
-                TextSpan(text: 'Платные: ${fmtDist(r.tollMeters)} — ${fmtMoney(r.tollCost, cur)}', style: const TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.w600))
+                TextSpan(text: 'Платные дороги: ${fmtDist(r.tollMeters)} — ${fmtMoney(r.tollCost)}', style: const TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.w600))
               else
                 const TextSpan(text: 'Без платных дорог'),
-              TextSpan(text: ' · топливо ${r.fuelLiters.toStringAsFixed(1)} л — ${fmtMoney(r.fuelCost, cur)}'),
             ]), style: Theme.of(context).textTheme.bodySmall),
             if (selected)
               Padding(
@@ -570,7 +566,7 @@ class _HomePageState extends State<HomePage> {
                 child: Text(
                   nav.arrived
                       ? 'Вы прибыли в пункт назначения'
-                      : 'Осталось ${fmtDist(nav.remaining)} · ${fmtTime(r.hours * nav.remainingFraction)} · ${fmtMoney(r.money * nav.remainingFraction, s.prefs.currency)}',
+                      : 'Осталось ${fmtDist(nav.remaining)} · ${fmtTime(r.hours * nav.remainingFraction)}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),

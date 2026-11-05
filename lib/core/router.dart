@@ -5,12 +5,6 @@ import 'geo.dart';
 import 'prefs.dart';
 import 'road_graph.dart';
 
-/// Расход топлива относительно среднего: минимум около 70 км/ч.
-double fuelFactor(double v) {
-  final d = (v - 70) / 60;
-  return 0.8 + 0.5 * d * d;
-}
-
 double effectiveSpeed(int speedLimit, int cls, RoutePrefs p) =>
     math.max(5, math.min(speedLimit.toDouble(), p.vehicleMax) * classFactor[cls]);
 
@@ -61,24 +55,25 @@ class MinHeap {
 
 class RouteResult {
   final List<int> edges;
-  final double hours, meters, tollCost, tollMeters, fuelLiters, fuelCost;
+  final double hours, meters, tollCost, tollMeters;
   final Set<String> tags = {}; // best, fastest, cheapest
-  RouteResult(this.edges, this.hours, this.meters, this.tollCost, this.tollMeters, this.fuelLiters, this.fuelCost);
-  double get money => tollCost + fuelCost;
+  RouteResult(this.edges, this.hours, this.meters, this.tollCost, this.tollMeters);
+
+  /// Затраты на дорогу — только платные участки (топливо и цена времени не учитываются).
+  double get money => tollCost;
 }
 
-/// Подготовленные для одного поиска данные: допустимость рёбер, время, топливо, платежи.
+/// Подготовленные для одного поиска данные: допустимость рёбер, время, платежи.
 class SearchContext {
   final RoadGraph g;
   final RoutePrefs p;
   final int startNode, endNode;
   final Uint8List allowed;
-  final Float64List hours, fuelL, toll, mult;
+  final Float64List hours, toll, mult;
   double vmax = 30;
   SearchContext(this.g, this.p, this.startNode, this.endNode)
       : allowed = Uint8List(g.edgeCount),
         hours = Float64List(g.edgeCount),
-        fuelL = Float64List(g.edgeCount),
         toll = Float64List(g.edgeCount),
         mult = Float64List(g.edgeCount);
   // буферы поиска переиспользуются между запусками
@@ -118,7 +113,6 @@ SearchContext prepare(RoadGraph g, int startNode, int endNode, RoutePrefs p) {
     final cls = g.cls[i];
     final v = effectiveSpeed(g.speed[i], cls, p), km = g.len[i] / 1000;
     ctx.hours[i] = km / v;
-    ctx.fuelL[i] = km * p.fuelPer100 / 100 * fuelFactor(v);
     ctx.toll[i] = g.toll[i] == 1 ? km * p.tollPerKm(cls) : 0;
     ctx.mult[i] = p.tollMode == TollMode.prefer && g.toll[i] == 0 ? p.preferPenalty : 1;
     if (v > ctx.vmax) ctx.vmax = v;
@@ -133,10 +127,13 @@ SearchContext prepare(RoadGraph g, int startNode, int endNode, RoutePrefs p) {
   return ctx;
 }
 
-/// A* для заданной цены часа lambda (валюта/час). null — маршрута нет.
+/// A* для заданного веса времени lambda (€ за час — внутренний параметр компромисса «время ↔ платные дороги»,
+/// не настройка пользователя). null — маршрута нет.
 RouteResult? search(SearchContext ctx, double lambda) {
   final g = ctx.g, p = ctx.p;
-  final fee = p.tollMode == TollMode.free ? 0.0 : p.tollEntry;
+  // В режиме «предпочитать платные» платежи в целевую функцию не входят: выбор делает штраф времени на бесплатных дорогах.
+  final prefer = p.tollMode == TollMode.prefer;
+  final fee = (p.tollMode == TollMode.free || prefer) ? 0.0 : p.tollEntry;
   final n = g.nodeCount;
   final dist = ctx.dist..fillRange(0, n * 2, double.infinity);
   final prevE = ctx.prevE..fillRange(0, n * 2, -1);
@@ -167,7 +164,7 @@ RouteResult? search(SearchContext ctx, double lambda) {
       final isToll = g.toll[ei];
       final ns = g.to[ei] * 2 + isToll;
       final c = d +
-          (ctx.hours[ei] * lambda + ctx.fuelL[ei] * p.fuelPrice + ctx.toll[ei]) * ctx.mult[ei] +
+          (ctx.hours[ei] * lambda + (prefer ? 0.0 : ctx.toll[ei])) * ctx.mult[ei] +
           (isToll == 1 && f == 0 ? fee : 0);
       if (c < dist[ns]) {
         dist[ns] = c;
@@ -187,12 +184,11 @@ RouteResult? search(SearchContext ctx, double lambda) {
 
 RouteResult summarize(SearchContext ctx, List<int> path) {
   final g = ctx.g, p = ctx.p;
-  double hrs = 0, m = 0, tollM = 0, tollLen = 0, lit = 0;
+  double hrs = 0, m = 0, tollM = 0, tollLen = 0;
   var inToll = false;
   for (final e in path) {
     hrs += ctx.hours[e];
     m += g.len[e];
-    lit += ctx.fuelL[e];
     if (g.toll[e] == 1) {
       tollM += ctx.toll[e];
       tollLen += g.len[e];
@@ -200,7 +196,7 @@ RouteResult summarize(SearchContext ctx, List<int> path) {
     }
     inToll = g.toll[e] == 1;
   }
-  return RouteResult(path, hrs, m, tollM, tollLen, lit, lit * p.fuelPrice);
+  return RouteResult(path, hrs, m, tollM, tollLen);
 }
 
 class PlanResult {
@@ -213,20 +209,24 @@ class PlanResult {
         ctx = null;
 }
 
-/// Строит набор маршрутов на фронте Парето «время ↔ деньги»; первый — оптимальный для цены часа.
+/// Вес времени для выбранного приоритета: «быстрее» — время важнее любых платежей; «дешевле» — только
+/// платные участки, а время лишь разрешает ничьи.
+double lambdaFor(Priority p) => p == Priority.fastest ? 1e6 : 0.01;
+
+/// Строит набор маршрутов на фронте Парето «время ↔ платные дороги»; первый — для выбранного приоритета.
 PlanResult planRoutes(RoadGraph g, LatLon start, LatLon end, RoutePrefs p) {
   final ss = g.nearestNodes(start.lat, start.lon), es = g.nearestNodes(end.lat, end.lon);
   if (ss.isEmpty) return PlanResult.fail('Рядом с точкой старта нет дорог в загруженных данных.');
   if (es.isEmpty) return PlanResult.fail('Рядом с точкой финиша нет дорог в загруженных данных.');
-  final base = p.valueOfTime > 0 ? p.valueOfTime : 100.0;
-  final lambdas = <double>[0, for (var k = -5; k <= 5; k++) base * math.pow(2, k), base * 1e4];
+  // промежуточные точки фронта Парето: веса от «почти только платежи» до «почти только время»
+  final lambdas = <double>[0.01, for (var k = 0; k <= 5; k++) 0.5 * math.pow(4, k), 1e6];
 
   final combos = [for (var i = 0; i < ss.length; i++) for (var j = 0; j < es.length; j++) (i, j)]
     ..sort((a, b) => (a.$1 + a.$2).compareTo(b.$1 + b.$2));
   for (final (i, j) in combos) {
     if (ss[i].id == es[j].id) continue;
     final ctx = prepare(g, ss[i].id, es[j].id, p);
-    final main = search(ctx, p.valueOfTime);
+    final main = search(ctx, lambdaFor(p.priority));
     if (main == null) continue;
     final seen = <String, RouteResult>{main.edges.join(','): main};
     for (final l in lambdas) {

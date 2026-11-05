@@ -33,43 +33,43 @@ void main() {
     expect(gg.ptStart[1] - gg.ptStart[0], 3);
   });
 
-  test('при низкой цене времени — бесплатная дорога', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 100));
+  test('приоритет «дешевле» — бесплатная дорога', () {
+    final res = plan(g, RoutePrefs(priority: Priority.cheapest));
     expect(res.routes, isNotNull, reason: res.error);
     expect(res.routes!.first.tollCost, 0);
   });
 
-  test('при высокой цене времени — платная магистраль', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 3000));
+  test('приоритет «быстрее» — платная магистраль', () {
+    final res = plan(g, RoutePrefs(priority: Priority.fastest));
     expect(res.routes!.first.tollCost, greaterThan(0));
     expect(names(g, res.routes!.first), contains('Платная магистраль М-Демо'));
   });
 
   test('режим «только бесплатные» не использует платные дороги', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 100000, tollMode: TollMode.free));
+    final res = plan(g, RoutePrefs(priority: Priority.fastest, tollMode: TollMode.free));
     for (final r in res.routes!) {
       expect(r.tollCost, 0);
     }
   });
 
-  test('режим «предпочитать платные» выбирает магистраль даже при дешёвом времени', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 50, tollMode: TollMode.prefer));
+  test('режим «предпочитать платные» выбирает магистраль даже при приоритете «дешевле»', () {
+    final res = plan(g, RoutePrefs(priority: Priority.cheapest, tollMode: TollMode.prefer));
     expect(res.routes!.first.tollCost, greaterThan(0));
   });
 
   test('фильтр по типу дорог', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 100000, classes: {1, 2, 3, 4, 5, 6, 7}));
+    final res = plan(g, RoutePrefs(priority: Priority.fastest, classes: {1, 2, 3, 4, 5, 6, 7}));
     expect(res.routes!.first.tollCost, 0);
     expect(names(g, res.routes!.first), contains('Шоссе Северное'));
   });
 
   test('фильтр по максимальному лимиту скорости', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 100000, maxSpeed: 60));
+    final res = plan(g, RoutePrefs(priority: Priority.fastest, maxSpeed: 60));
     expect(names(g, res.routes!.first), isNot(contains('Платная магистраль М-Демо')));
   });
 
   test('фильтр по минимальному лимиту скорости', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 0.0001, minSpeed: 60));
+    final res = plan(g, RoutePrefs(priority: Priority.cheapest, minSpeed: 60));
     expect(names(g, res.routes!.first), isNot(contains('Южная дорога')));
   });
 
@@ -78,8 +78,25 @@ void main() {
     expect(res.routes, isNotNull, reason: res.error);
   });
 
+  test('топливо и цена времени не влияют на стоимость: затраты = только платные участки', () {
+    final res = plan(g, RoutePrefs(priority: Priority.fastest));
+    for (final r in res.routes!) {
+      expect(r.money, r.tollCost);
+    }
+    // тариф 0.10 €/км на ~50 км магистрали ≈ 5 €
+    final toll = res.routes!.firstWhere((r) => r.tollCost > 0);
+    expect(toll.tollCost, inInclusiveRange(4.5, 5.5));
+  });
+
+  test('приоритет «дешевле»: из равных по стоимости — самый быстрый', () {
+    final res = plan(g, RoutePrefs(priority: Priority.cheapest, tollMode: TollMode.free));
+    final free = res.routes!;
+    expect(free.every((r) => r.tollCost == 0), isTrue);
+    expect(free.first.hours, lessThanOrEqualTo(free.last.hours + 1e-9));
+  });
+
   test('есть альтернативы: самый быстрый и самый дешёвый', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 300));
+    final res = plan(g, RoutePrefs(priority: Priority.fastest));
     final fast = res.routes!.firstWhere((r) => r.tags.contains('fastest'));
     final cheap = res.routes!.firstWhere((r) => r.tags.contains('cheapest'));
     expect(fast.hours, lessThan(cheap.hours));
@@ -92,7 +109,7 @@ void main() {
   });
 
   test('пошаговые инструкции', () {
-    final res = plan(g, RoutePrefs(valueOfTime: 3000));
+    final res = plan(g, RoutePrefs(priority: Priority.fastest));
     final data = buildRouteData(g, res.routes!.first);
     expect(data.steps.first.text, startsWith('Начните движение'));
     expect(data.steps.last.type, TurnType.arrive);
@@ -102,9 +119,9 @@ void main() {
   });
 
   test('настройки сериализуются', () {
-    final p = RoutePrefs(valueOfTime: 123, tollMode: TollMode.free, classes: {0, 2});
+    final p = RoutePrefs(priority: Priority.cheapest, tollMode: TollMode.free, classes: {0, 2});
     final q = RoutePrefs.fromJson(p.toJson());
-    expect(q.valueOfTime, 123);
+    expect(q.priority, Priority.cheapest);
     expect(q.tollMode, TollMode.free);
     expect(q.classes, {0, 2});
   });

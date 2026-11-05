@@ -21,26 +21,23 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final cur = p.currency;
     return Scaffold(
       appBar: AppBar(title: const Text('Настройки маршрута')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
           _h('Что важнее'),
-          SegmentedButton<double>(
+          SegmentedButton<Priority>(
             segments: const [
-              ButtonSegment(value: 5000, label: Text('Быстрее'), icon: Icon(Icons.bolt)),
-              ButtonSegment(value: 300, label: Text('Баланс'), icon: Icon(Icons.balance)),
-              ButtonSegment(value: 0, label: Text('Дешевле'), icon: Icon(Icons.savings)),
+              ButtonSegment(value: Priority.fastest, label: Text('Быстрее', maxLines: 1), icon: Icon(Icons.bolt)),
+              ButtonSegment(value: Priority.cheapest, label: Text('Дешевле', maxLines: 1), icon: Icon(Icons.savings)),
             ],
-            emptySelectionAllowed: true,
-            selected: {if ([5000.0, 300.0, 0.0].contains(p.valueOfTime)) p.valueOfTime},
-            onSelectionChanged: (s) => _changed(() => p.valueOfTime = s.first),
+            selected: {p.priority},
+            onSelectionChanged: (s) => _changed(() => p.priority = s.first),
           ),
-          _num('Цена вашего часа времени, $cur/ч', p.valueOfTime, (v) => p.valueOfTime = v, step: 10),
-          _hint('Маршрут минимизирует «время × цена часа + платные дороги + топливо». '
-              'Чем дороже ваше время, тем охотнее выбираются платные скоростные дороги.'),
+          _hint('Быстрее — самый быстрый маршрут. Дешевле — минимум платных дорог (из равных по стоимости выбирается самый быстрый). '
+              'Остальные варианты на границе «время и платные дороги» показываются ниже в списке маршрутов. '
+              'Цена вашего времени и топливо в расчёте не учитываются.'),
           _h('Платные дороги'),
           SegmentedButton<TollMode>(
             segments: const [
@@ -88,13 +85,10 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (v) => _changed(() => p.vehicleMax = v),
           ),
           _hint('Рядом со стартом и финишем (~800 м) мелкие улицы доступны всегда — иначе нельзя выехать со двора.'),
-          _h('Стоимость проезда и топлива'),
-          _text('Валюта', p.currency, (v) => p.currency = v.isEmpty ? '₽' : v),
-          _num('Платная магистраль / шоссе, $cur/км', p.tollHigh, (v) => p.tollHigh = v, step: 0.5),
-          _num('Прочие платные дороги, $cur/км', p.tollLow, (v) => p.tollLow = v, step: 0.5),
-          _num('Плата за въезд на платный участок, $cur', p.tollEntry, (v) => p.tollEntry = v, step: 10),
-          _num('Расход топлива, л/100 км', p.fuelPer100, (v) => p.fuelPer100 = v, step: 0.5),
-          _num('Цена топлива, $cur/л', p.fuelPrice, (v) => p.fuelPrice = v, step: 1),
+          _h('Тарифы платных дорог, €'),
+          _num('Платная магистраль / шоссе, €/км', p.tollHigh, (v) => p.tollHigh = v),
+          _num('Прочие платные дороги, €/км', p.tollLow, (v) => p.tollLow = v),
+          _num('Плата за въезд на платный участок, €', p.tollEntry, (v) => p.tollEntry = v),
           _hint('OpenStreetMap знает, какие дороги платные, но не тарифы — поэтому ставки задаёте вы.'),
         ],
       ),
@@ -111,7 +105,7 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Text(t, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor)),
       );
 
-  Widget _num(String label, double value, void Function(double) set, {double step = 1}) => Padding(
+  Widget _num(String label, double value, void Function(double) set) => Padding(
         padding: const EdgeInsets.only(top: 8),
         child: TextFormField(
           key: ValueKey('$label-${value == value.roundToDouble() ? value.round() : value}'),
@@ -124,19 +118,6 @@ class _SettingsPageState extends State<SettingsPage> {
               set(v);
               widget.state.savePrefs();
             }
-          },
-        ),
-      );
-
-  Widget _text(String label, String value, void Function(String) set) => Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: TextFormField(
-          initialValue: value,
-          maxLength: 4,
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), isDense: true, counterText: ''),
-          onChanged: (t) {
-            set(t.trim());
-            widget.state.savePrefs();
           },
         ),
       );
