@@ -460,6 +460,8 @@ class _HomePageState extends State<HomePage> {
               else
                 const TextSpan(text: 'Без платных дорог'),
             ]), style: Theme.of(context).textTheme.bodySmall),
+            if (r.tollMeters > 0)
+              Text(_tariffNote(r), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor)),
             if (selected)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
@@ -478,6 +480,13 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  /// Откуда взята цена платных участков: тарифы операторов или ваша ставка из настроек.
+  String _tariffNote(RouteData r) {
+    if (r.tollKnownMeters <= 0) return 'Оценка по вашей ставке из настроек (тарифов оператора для этих дорог нет)';
+    if (r.tollKnownMeters >= r.tollMeters - 1) return 'Цена по тарифам операторов';
+    return 'По тарифам операторов: ${fmtDist(r.tollKnownMeters)} из ${fmtDist(r.tollMeters)}, остальное — по вашей ставке';
   }
 
   static const _icons = {

@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import '../core/geo.dart';
 import '../core/prefs.dart';
+import '../core/tariffs.dart';
 import 'demo_source.dart';
 import 'engine.dart';
 import 'overpass_source.dart';
@@ -37,7 +38,8 @@ class RoutingService {
     });
   }
 
-  static Future<RoutingService> start() async {
+  /// [tariffFiles] — тексты JSON с тарифами операторов (assets/tariffs).
+  static Future<RoutingService> start({List<String> tariffFiles = const []}) async {
     final recv = ReceivePort();
     await Isolate.spawn(_workerMain, recv.sendPort);
     final events = StreamController<dynamic>();
@@ -46,6 +48,7 @@ class RoutingService {
     await sub.cancel();
     final back = ReceivePort();
     first.send(back.sendPort);
+    first.send(['tariffs', 0, tariffFiles]);
     return RoutingService._(first, back);
   }
 
@@ -80,6 +83,12 @@ void _workerMain(SendPort main) {
     }
     final list = msg as List;
     final id = list[1] as int;
+    if (list[0] == 'tariffs') {
+      final book = TariffBook.parse((list[2] as List).cast<String>());
+      real.tariffs = book;
+      demo.tariffs = book;
+      return;
+    }
     if (list[0] == 'cancel') {
       tokens[id]?.cancelled = true;
       return;

@@ -5,6 +5,7 @@ import '../core/prefs.dart';
 import '../core/road_graph.dart';
 import '../core/route_data.dart';
 import '../core/router.dart';
+import '../core/tariffs.dart';
 import 'road_source.dart';
 
 class PlanOutcome {
@@ -30,7 +31,10 @@ class RoutingEngine {
   static const chunkMeters = 150000.0;
   static const spineStepMeters = 30000.0;
 
-  RoutingEngine(this.source);
+  RoutingEngine(this.source, {TariffBook? tariffs}) : tariffs = tariffs ?? TariffBook.empty;
+
+  /// Тарифы операторов платных дорог (пустые — везде ставка из настроек).
+  TariffBook tariffs;
 
   final List<WayData> _pieces = [];
   final Set<String> _have = {};
@@ -58,7 +62,7 @@ class RoutingEngine {
           g.nearestNodes(end.lat, end.lon, count: 1, maxMeters: 300).isNotEmpty;
       if (sameArea || near) {
         onProgress?.call('Считаю маршруты…');
-        final res = planRoutes(g, start, end, prefs);
+        final res = planRoutes(g, start, end, prefs, tariffs: tariffs);
         if (res.routes != null) {
           if (!sameArea) _areaKey = key;
           return _ok(g, res, km, d > regionalMaxMeters);
@@ -133,7 +137,7 @@ class RoutingEngine {
     final g = _rebuild();
     if (g.edgeCount == 0) return PlanOutcome(error: 'В выбранной области нет дорог.', distanceKm: km);
     progress?.call('Считаю маршруты…');
-    final res = planRoutes(g, start, end, prefs);
+    final res = planRoutes(g, start, end, prefs, tariffs: tariffs);
     if (res.routes == null) return PlanOutcome(error: res.error, distanceKm: km);
     return _ok(g, res, km, false);
   }
@@ -224,7 +228,7 @@ class RoutingEngine {
       progress?.call('Строю граф дорог…');
       g = _rebuild();
       progress?.call('Ищу маршрут по каркасу дорог…');
-      last = planRoutes(g, start, end, prefs);
+      last = planRoutes(g, start, end, prefs, tariffs: tariffs);
       if (last.routes != null) {
         coarse = last;
         usedTier = tier;
@@ -260,7 +264,7 @@ class RoutingEngine {
         progress?.call('Строю граф дорог…');
         final g2 = _rebuild();
         progress?.call('Пересчитываю маршруты…');
-        final refined = planRoutes(g2, start, end, prefs);
+        final refined = planRoutes(g2, start, end, prefs, tariffs: tariffs);
         if (refined.routes != null) return _ok(g2, refined, km, true, note: note);
         note = '$note (уточнение не удалось, показан маршрут по каркасу)';
       } on CancelledException {

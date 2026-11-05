@@ -31,10 +31,10 @@ class WayInfo {
   final int cls; // индекс в roadClasses
   final bool link;
   final int dir; // 0 — в обе стороны, 1 — только вперёд, 2 — только назад
-  final String name, ref;
+  final String name, ref, operator;
   final bool toll;
   final int fwd, bwd; // лимиты, км/ч
-  const WayInfo(this.cls, this.link, this.dir, this.name, this.ref, this.toll, this.fwd, this.bwd);
+  const WayInfo(this.cls, this.link, this.dir, this.name, this.ref, this.operator, this.toll, this.fwd, this.bwd);
 }
 
 /// Компактный набор путей (результат одного запроса к OSM).
@@ -93,6 +93,7 @@ WayInfo? wayInfoFromTags(Map<String, dynamic> t) {
     dir,
     (t['name'] as String?) ?? '',
     (t['ref'] as String?) ?? '',
+    (t['operator'] as String?) ?? '',
     t['toll'] == 'yes' || t['toll:motor_vehicle'] == 'yes',
     parseMaxspeed(t['maxspeed:forward']) ?? base,
     parseMaxspeed(t['maxspeed:backward']) ?? base,
@@ -110,20 +111,21 @@ class RoadGraph {
   final Uint8List speed; // лимит км/ч
   final Uint8List cls;
   final Uint8List toll; // 0/1
-  final Int32List nameIdx, refIdx;
+  final Int32List nameIdx, refIdx, opIdx;
   final List<String> strings;
   // геометрия рёбер: точки [ptStart[e], ptStart[e+1]) в ptLat/ptLon
   final Int32List ptStart;
   final Float64List ptLat, ptLon;
 
   RoadGraph._(this.nodeCount, this.edgeCount, this.lat, this.lon, this.outStart, this.outEdges, this.inStart,
-      this.inEdges, this.from, this.to, this.len, this.speed, this.cls, this.toll, this.nameIdx, this.refIdx,
+      this.inEdges, this.from, this.to, this.len, this.speed, this.cls, this.toll, this.nameIdx, this.refIdx, this.opIdx,
       this.strings, this.ptStart, this.ptLat, this.ptLon);
 
   static final empty = RoadGraph.build(const []);
 
   String edgeName(int e) => strings[nameIdx[e]];
   String edgeRef(int e) => strings[refIdx[e]];
+  String edgeOperator(int e) => strings[opIdx[e]];
 
   /// Строит граф из наборов путей (дубликаты путей из разных запросов отбрасываются).
   static RoadGraph build(List<WayData> chunks) {
@@ -157,7 +159,7 @@ class RoadGraph {
       return i;
     }
 
-    final eFrom = I32Buf(), eTo = I32Buf(), eName = I32Buf(), eRef = I32Buf(), ePtStart = I32Buf();
+    final eFrom = I32Buf(), eTo = I32Buf(), eName = I32Buf(), eRef = I32Buf(), eOp = I32Buf(), ePtStart = I32Buf();
     final eLen = F64Buf(), pLat = F64Buf(), pLon = F64Buf();
     final eSpeed = <int>[], eCls = <int>[], eToll = <int>[];
     final strings = <String>[''];
@@ -193,6 +195,7 @@ class RoadGraph {
       eToll.add(info.toll ? 1 : 0);
       eName.add(str(info.name));
       eRef.add(str(info.ref));
+      eOp.add(str(info.operator));
     }
 
     for (final c in chunks) {
@@ -260,6 +263,7 @@ class RoadGraph {
       Uint8List.fromList(eToll),
       eName.take(),
       eRef.take(),
+      eOp.take(),
       strings,
       ePtStart.take(),
       pLat.take(),

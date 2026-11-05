@@ -21,13 +21,13 @@ class Step {
 /// Готовый к отображению и навигации маршрут: не зависит от графа (можно передавать между изолятами).
 class RouteData {
   final Set<String> tags;
-  final double hours, meters, tollCost, tollMeters;
+  final double hours, meters, tollCost, tollMeters, tollKnownMeters;
   final Float64List pts; // lat, lon, lat, lon…
   final Int32List edgeStartPt; // для ребра k — индекс точки начала; длина = рёбер + 1
   final Int32List edgeSpeed; // лимит по рёбрам
   final Uint8List edgeToll; // 1 — платное
   final List<Step> steps;
-  const RouteData(this.tags, this.hours, this.meters, this.tollCost, this.tollMeters,
+  const RouteData(this.tags, this.hours, this.meters, this.tollCost, this.tollMeters, this.tollKnownMeters,
       this.pts, this.edgeStartPt, this.edgeSpeed, this.edgeToll, this.steps);
 
   double get money => tollCost;
@@ -132,6 +132,6 @@ RouteData buildRouteData(RoadGraph g, RouteResult r) {
   final lastLat = pts.isEmpty ? 0.0 : pts[pts.length - 2], lastLon = pts.isEmpty ? 0.0 : pts[pts.length - 1];
   steps.add(Step(TurnType.arrive, 'Вы прибыли в пункт назначения', '', 0, false, 0, lastLat, lastLon, edges.length));
 
-  return RouteData(Set.of(r.tags), r.hours, r.meters, r.tollCost, r.tollMeters,
+  return RouteData(Set.of(r.tags), r.hours, r.meters, r.tollCost, r.tollMeters, r.tollKnownMeters,
       Float64List.fromList(pts), edgeStart, speeds, tolls, steps);
 }

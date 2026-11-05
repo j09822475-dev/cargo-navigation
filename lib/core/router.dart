@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'geo.dart';
 import 'prefs.dart';
 import 'road_graph.dart';
+import 'tariffs.dart';
 
 double effectiveSpeed(int speedLimit, int cls, RoutePrefs p) =>
     math.max(5, math.min(speedLimit.toDouble(), p.vehicleMax) * classFactor[cls]);
@@ -56,8 +57,11 @@ class MinHeap {
 class RouteResult {
   final List<int> edges;
   final double hours, meters, tollCost, tollMeters;
+
+  /// Сколько метров платных участков посчитано по тарифам операторов (остальное — по ставке из настроек).
+  final double tollKnownMeters;
   final Set<String> tags = {}; // best, fastest, cheapest
-  RouteResult(this.edges, this.hours, this.meters, this.tollCost, this.tollMeters);
+  RouteResult(this.edges, this.hours, this.meters, this.tollCost, this.tollMeters, this.tollKnownMeters);
 
   /// Затраты на дорогу — только платные участки (топливо и цена времени не учитываются).
   double get money => tollCost;
@@ -69,10 +73,12 @@ class SearchContext {
   final RoutePrefs p;
   final int startNode, endNode;
   final Uint8List allowed;
+  final Uint8List tollKnown; // 1 — ставка взята из тарифов оператора
   final Float64List hours, toll, mult;
   double vmax = 30;
   SearchContext(this.g, this.p, this.startNode, this.endNode)
       : allowed = Uint8List(g.edgeCount),
+        tollKnown = Uint8List(g.edgeCount),
         hours = Float64List(g.edgeCount),
         toll = Float64List(g.edgeCount),
         mult = Float64List(g.edgeCount);
@@ -104,7 +110,7 @@ void _reach(RoadGraph g, int node, double radius, bool outgoing, Uint8List out) 
   }
 }
 
-SearchContext prepare(RoadGraph g, int startNode, int endNode, RoutePrefs p) {
+SearchContext prepare(RoadGraph g, int startNode, int endNode, RoutePrefs p, {TariffBook? tariffs}) {
   final access = Uint8List(g.nodeCount);
   _reach(g, startNode, p.accessRadius, true, access);
   _reach(g, endNode, p.accessRadius, false, access);
@@ -113,7 +119,12 @@ SearchContext prepare(RoadGraph g, int startNode, int endNode, RoutePrefs p) {
     final cls = g.cls[i];
     final v = effectiveSpeed(g.speed[i], cls, p), km = g.len[i] / 1000;
     ctx.hours[i] = km / v;
-    ctx.toll[i] = g.toll[i] == 1 ? km * p.tollPerKm(cls) : 0;
+    if (g.toll[i] == 1) {
+      // тариф оператора (по тегам operator/ref), иначе ставка из настроек
+      final rule = tariffs?.matchCached(g.opIdx[i], g.refIdx[i], () => g.edgeOperator(i), () => g.edgeRef(i));
+      ctx.toll[i] = km * (rule?.perKm ?? p.tollPerKm(cls));
+      ctx.tollKnown[i] = rule == null ? 0 : 1;
+    }
     ctx.mult[i] = p.tollMode == TollMode.prefer && g.toll[i] == 0 ? p.preferPenalty : 1;
     if (v > ctx.vmax) ctx.vmax = v;
     var ok = true;
@@ -184,7 +195,7 @@ RouteResult? search(SearchContext ctx, double lambda) {
 
 RouteResult summarize(SearchContext ctx, List<int> path) {
   final g = ctx.g, p = ctx.p;
-  double hrs = 0, m = 0, tollM = 0, tollLen = 0;
+  double hrs = 0, m = 0, tollM = 0, tollLen = 0, known = 0;
   var inToll = false;
   for (final e in path) {
     hrs += ctx.hours[e];
@@ -192,11 +203,12 @@ RouteResult summarize(SearchContext ctx, List<int> path) {
     if (g.toll[e] == 1) {
       tollM += ctx.toll[e];
       tollLen += g.len[e];
+      if (ctx.tollKnown[e] == 1) known += g.len[e];
       if (!inToll && p.tollMode != TollMode.free) tollM += p.tollEntry;
     }
     inToll = g.toll[e] == 1;
   }
-  return RouteResult(path, hrs, m, tollM, tollLen);
+  return RouteResult(path, hrs, m, tollM, tollLen, known);
 }
 
 class PlanResult {
@@ -214,7 +226,7 @@ class PlanResult {
 double lambdaFor(Priority p) => p == Priority.fastest ? 1e6 : 0.01;
 
 /// Строит набор маршрутов на фронте Парето «время ↔ платные дороги»; первый — для выбранного приоритета.
-PlanResult planRoutes(RoadGraph g, LatLon start, LatLon end, RoutePrefs p) {
+PlanResult planRoutes(RoadGraph g, LatLon start, LatLon end, RoutePrefs p, {TariffBook? tariffs}) {
   final ss = g.nearestNodes(start.lat, start.lon), es = g.nearestNodes(end.lat, end.lon);
   if (ss.isEmpty) return PlanResult.fail('Рядом с точкой старта нет дорог в загруженных данных.');
   if (es.isEmpty) return PlanResult.fail('Рядом с точкой финиша нет дорог в загруженных данных.');
@@ -225,7 +237,7 @@ PlanResult planRoutes(RoadGraph g, LatLon start, LatLon end, RoutePrefs p) {
     ..sort((a, b) => (a.$1 + a.$2).compareTo(b.$1 + b.$2));
   for (final (i, j) in combos) {
     if (ss[i].id == es[j].id) continue;
-    final ctx = prepare(g, ss[i].id, es[j].id, p);
+    final ctx = prepare(g, ss[i].id, es[j].id, p, tariffs: tariffs);
     final main = search(ctx, lambdaFor(p.priority));
     if (main == null) continue;
     final seen = <String, RouteResult>{main.edges.join(','): main};
