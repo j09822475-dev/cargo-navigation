@@ -209,8 +209,10 @@ function draw(fit) {
   const flush = () => { if (run.length > 1) L.polyline(run, { color: '#f59e0b', weight: 7 }).addTo(routeLayer); run = []; };
   for (const ei of r.edges) { const e = graph.edges[ei]; if (e.toll) { if (!run.length) run.push(e.pts[0]); run.push(...e.pts.slice(1)); } else flush(); }
   flush();
-  if (fit) const wide = window.innerWidth > 700;
+  if (fit) {
+    const wide = window.innerWidth > 700;
     map.fitBounds(L.latLngBounds(all), { paddingTopLeft: wide ? [420, 40] : [30, 40], paddingBottomRight: [40, wide ? 40 : Math.round(window.innerHeight * 0.65)] });
+  }
 }
 
 // ---------- Навигация в пути ----------
