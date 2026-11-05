@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { demoGraph, DEMO_START, DEMO_END } from '../src/demo.js';
-import { planRoutes, buildSteps, ROAD_CLASSES } from '../src/router.js';
-import { parseMaxspeed, buildGraph } from '../src/osm.js';
+import { demoGraph, DEMO_START, DEMO_END } from '../web/src/demo.js';
+import { planRoutes, buildSteps, ROAD_CLASSES } from '../web/src/router.js';
+import { parseMaxspeed, buildGraph } from '../web/src/osm.js';
 
 const g = demoGraph();
 const plan = (prefs) => planRoutes(g, DEMO_START, DEMO_END, prefs);

@@ -140,7 +140,7 @@ $('demo').onclick = () => {
   state.demo = true; state.graph = demoGraph();
   setPoint('start', { lat: DEMO_START.lat, lng: DEMO_START.lon }, DEMO_START.label);
   setPoint('end', { lat: DEMO_END.lat, lng: DEMO_END.lon }, DEMO_END.label);
-  map.fitBounds([[55.68, 36.98], [55.82, 37.82]]);
+  map.fitBounds([[55.68, 36.98], [55.82, 37.82]], { animate: false });
   build(true);
 };
 
@@ -211,14 +211,19 @@ function draw(fit) {
   flush();
   if (fit) {
     const wide = window.innerWidth > 700;
-    map.fitBounds(L.latLngBounds(all), { paddingTopLeft: wide ? [420, 40] : [30, 40], paddingBottomRight: [40, wide ? 40 : Math.round(window.innerHeight * 0.65)] });
+    map.fitBounds(L.latLngBounds(all), { paddingTopLeft: wide ? [420, 40] : [30, 40], paddingBottomRight: [40, wide ? 40 : Math.round(window.innerHeight * 0.65)], animate: false });
   }
 }
 
 // ---------- Навигация в пути ----------
 const nav = { on: false, watch: null, sim: null, marker: null, pts: [], cum: [], edgeAt: [], stepAt: [], off: 0, spoken: new Set(), rerouting: false };
 const ICONS = { depart: '🚗', straight: '⬆', 'slight right': '↗', 'slight left': '↖', right: '➡', left: '⬅', 'sharp right': '↘', 'sharp left': '↙', uturn: '↩', arrive: '🏁' };
-function speak(t) { try { if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(t); u.lang = 'ru-RU'; speechSynthesis.cancel(); speechSynthesis.speak(u); } } catch { /* ignore */ } }
+function speak(t) {
+  try {
+    if (window.AndroidTTS) { window.AndroidTTS.speak(t); return; } // нативный голос в Android-приложении
+    if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(t); u.lang = 'ru-RU'; speechSynthesis.cancel(); speechSynthesis.speak(u); }
+  } catch { /* ignore */ }
+}
 
 function prepNav() {
   const { graph } = state.result; const r = state.result.routes[state.sel];
@@ -241,7 +246,7 @@ function stopNav() {
   nav.on = false; if (nav.watch != null) navigator.geolocation.clearWatch(nav.watch); nav.watch = null;
   clearInterval(nav.sim); nav.sim = null; nav.marker?.remove();
   document.body.classList.remove('navigating'); $('navbanner').hidden = true; $('navfooter').hidden = true;
-  try { speechSynthesis.cancel(); } catch { /* ignore */ }
+  try { if (window.AndroidTTS) window.AndroidTTS.stop(); else speechSynthesis.cancel(); } catch { /* ignore */ }
 }
 $('navstop').onclick = stopNav;
 
