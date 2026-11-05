@@ -1,6 +1,26 @@
-node_modules/
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+*.iml
+.idea/
+.vscode/
+.metadata
+# Android
 android/.gradle/
-android/build/
-android/app/build/
 android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/gradle-wrapper.jar
+android/key.properties
+*.jks
+*.keystore
 *.apk
+*.aab
+GeneratedPluginRegistrant.*

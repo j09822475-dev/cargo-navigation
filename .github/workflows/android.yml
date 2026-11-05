@@ -13,30 +13,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Тесты маршрутизатора
-        run: npm test
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - name: Принять лицензии Android SDK (SDK предустановлен на раннере)
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      - name: Сборка debug APK
-        working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.9
+          channel: stable
+          cache: true
+
+      - name: Зависимости
+        run: flutter pub get
+
+      - name: Анализ кода
+        run: flutter analyze
+
+      - name: Тесты (маршрутизатор, дальние маршруты, навигация, UI)
+        run: flutter test
+
+      - name: Сборка APK
+        run: flutter build apk --release
+
+      - name: Подготовить файл для релиза
+        run: cp build/app/outputs/flutter-apk/app-release.apk cargo-navigation.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cargo-navigation-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Подготовить файл для релиза
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk cargo-navigation.apk
+          name: cargo-navigation-apk
+          path: cargo-navigation.apk
 
       - name: Опубликовать APK в GitHub Releases
         if: github.event_name != 'pull_request'
@@ -45,6 +51,6 @@ jobs:
           tag_name: apk-latest
           target_commitish: ${{ github.sha }}
           name: Cargo Navigation (последняя сборка)
-          body: Debug-сборка Android-приложения. Установка из неизвестных источников.
+          body: Android-приложение на Flutter. Для установки разрешите установку из неизвестных источников.
           prerelease: true
           files: cargo-navigation.apk
