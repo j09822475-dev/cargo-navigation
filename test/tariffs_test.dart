@@ -136,15 +136,22 @@ void main() {
       }
     });
 
-    test('AREA (Франция): ставка из данных APRR, чужие операторы не затронуты', () {
+    test('AREA и APRR (Франция): ставки из открытых данных, у каждого оператора своя', () {
       final book = TariffBook.parse([for (final n in names) File('assets/tariffs/$n').readAsStringSync()]);
       final area = book.match('AREA', 'A41');
       expect(area, isNotNull);
       expect(area!.country, 'FR');
       expect(area.perKm, closeTo(0.132, 0.001), reason: 'взвешенная средняя ставка класса 1 по файлу AREA за 2026-02');
       expect(book.match('Autoroutes Rhône-Alpes', ''), isNotNull);
-      expect(book.match('APRR', 'A6'), isNull, reason: 'ставка AREA не распространяется на остальную сеть APRR');
-      expect(book.match('Vinci', 'A7'), isNull);
+
+      final aprr = book.match('APRR', 'A6');
+      expect(aprr, isNotNull);
+      expect(aprr!.perKm, closeTo(0.112, 0.001), reason: 'взвешенная средняя ставка класса 1 по основной сети APRR за 2026-02');
+      expect(book.match('Autoroutes Paris-Rhin-Rhône', 'A31')!.perKm, aprr.perKm);
+      expect(aprr.perKm, isNot(area.perKm), reason: 'AREA и APRR — разные операторы с разными ставками');
+
+      expect(book.match('Vinci', 'A7'), isNull, reason: 'операторов вне таблицы нет');
+      expect(book.match('Sanef', 'A4'), isNull);
     });
   });
 }
