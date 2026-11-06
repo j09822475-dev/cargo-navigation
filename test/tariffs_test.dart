@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cargo_navigation/core/geo.dart';
 import 'package:cargo_navigation/core/prefs.dart';
@@ -115,6 +116,35 @@ void main() {
       expect(() => buildTariffJson('', operator: 'Оп', country: 'XX', updated: 'u', source: 's'), throwsFormatException);
       expect(() => buildTariffJson('a,b\n1,2', operator: 'Оп', country: 'XX', updated: 'u', source: 's'), throwsFormatException);
       expect(() => buildTariffJson('ref,length_km,price_eur\nA1,x,y', operator: 'Оп', country: 'XX', updated: 'u', source: 's'), throwsFormatException);
+    });
+  });
+
+  group('реальные файлы тарифов в assets/tariffs', () {
+    final index = jsonDecode(File('assets/tariffs/index.json').readAsStringSync()) as Map<String, dynamic>;
+    final names = (index['files'] as List).cast<String>();
+
+    test('все файлы из index.json существуют и корректно разбираются', () {
+      expect(names, isNotEmpty);
+      final errors = <String>[];
+      final book = TariffBook.parse([for (final n in names) File('assets/tariffs/$n').readAsStringSync()], errors: errors);
+      expect(errors, isEmpty);
+      expect(book.isEmpty, isFalse);
+      for (final r in book.rules) {
+        expect(r.perKm, inInclusiveRange(0.03, 0.6), reason: '${r.operator}: ставка вне разумного диапазона');
+        expect(r.source, startsWith('https://'), reason: 'у каждого тарифа должен быть источник');
+        expect(r.updated, isNotEmpty);
+      }
+    });
+
+    test('AREA (Франция): ставка из данных APRR, чужие операторы не затронуты', () {
+      final book = TariffBook.parse([for (final n in names) File('assets/tariffs/$n').readAsStringSync()]);
+      final area = book.match('AREA', 'A41');
+      expect(area, isNotNull);
+      expect(area!.country, 'FR');
+      expect(area.perKm, closeTo(0.132, 0.001), reason: 'взвешенная средняя ставка класса 1 по файлу AREA за 2026-02');
+      expect(book.match('Autoroutes Rhône-Alpes', ''), isNotNull);
+      expect(book.match('APRR', 'A6'), isNull, reason: 'ставка AREA не распространяется на остальную сеть APRR');
+      expect(book.match('Vinci', 'A7'), isNull);
     });
   });
 }

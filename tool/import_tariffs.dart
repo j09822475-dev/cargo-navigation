@@ -1,7 +1,7 @@
 // Импорт тарифов оператора из CSV в assets/tariffs/*.json.
 //
 //   dart run tool/import_tariffs.dart --operator "APRR" --alias "APRR" --country FR \
-//        --updated 2026-08-02 --source "https://…" sections.csv > assets/tariffs/aprr.json
+//        --updated 2026-08-02 --source "https://…" [--note "пояснение"] sections.csv > assets/tariffs/aprr.json
 //
 // После импорта добавьте имя файла в assets/tariffs/index.json.
 import 'dart:io';
@@ -29,6 +29,7 @@ void main(List<String> args) {
       country: one('country'),
       updated: one('updated'),
       source: one('source'),
+      note: opts['note']?.first ?? '',
     );
     for (final w in r.warnings) {
       stderr.writeln('Предупреждение: $w');

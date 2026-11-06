@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "operator": "AREA (группа APRR)",
+  "aliases": [
+    "AREA",
+    "Autoroutes Rhône-Alpes",
+    "Société des Autoroutes Rhône-Alpes"
+  ],
+  "country": "FR",
+  "updated": "2026-02",
+  "source": "https://www.data.gouv.fr/datasets/tarifs-autoroutes-aprr",
+  "note": "Средняя ставка для класса 1 (легковые) по 955 парам въезд-выезд сети AREA (Альпы): взвешена по длине, медиана 0,130, основной разброс 0,11-0,16 EUR/км; участки A41 на север (Анси, Сен-Мартен-Бельвю) до 0,36. Тарифы привязаны к станциям, а не к номерам дорог, поэтому применяется ставка оператора целиком.",
+  "rules": [
+    {
+      "perKm": 0.132
+    }
+  ]
+}

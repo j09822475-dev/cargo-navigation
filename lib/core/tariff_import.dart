@@ -19,6 +19,7 @@ TariffImportResult buildTariffJson(
   required String country,
   required String updated,
   required String source,
+  String note = '',
 }) {
   final warnings = <String>[];
   final lines = const LineSplitter().convert(csv).where((l) => l.trim().isNotEmpty).toList();
@@ -57,6 +58,7 @@ TariffImportResult buildTariffJson(
     'country': country,
     'updated': updated,
     'source': source,
+    if (note.isNotEmpty) 'note': note,
     'rules': rules,
   };
   return TariffImportResult(const JsonEncoder.withIndent('  ').convert(out), warnings, sections);
