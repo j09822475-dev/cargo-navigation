@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "updated": "2026-11",
+  "note": "Цены для легкового авто до 3,5 т. Виньетка — самый короткий срок действия. Сайты операторов из среды разработки были недоступны: цены взяты из публикаций, ссылающихся на операторов и госпорталы; поле confirmed=false означает, что источники расходятся или это оценка. Курсы валют приблизительные (24,5 CZK, 395 HUF, 5,05 RON за евро). Особые платные участки (тоннели, мосты, перевалы) не учтены.",
+  "countries": {
+    "AT": {"scheme": "vignette", "priceEur": 9.60, "product": "1 день", "classes": [0, 1], "confirmed": true,
+           "source": "https://www.oesterreich.gv.at/themen/mobilitaet/kfz/10/Vignette-und-Maut/Vignette-fuer-Fahrzeuge-bis-3,5-t"},
+    "CZ": {"scheme": "vignette", "priceEur": 9.40, "original": "230 CZK", "product": "1 день", "classes": [0], "confirmed": true,
+           "source": "https://www.e15.cz/dalnicni-znamka-2026"},
+    "SK": {"scheme": "vignette", "priceEur": 8.10, "product": "1 день", "classes": [0, 1], "confirmed": true,
+           "source": "https://pravnenoviny.sk/dialnicna-znamka-2026-v-predaji-skor-nez-zvycajne-prehlad-cien/"},
+    "SI": {"scheme": "vignette", "priceEur": 16.00, "product": "7 дней", "classes": [0, 1], "confirmed": true,
+           "source": "https://n1info.si/novice/slovenija/vinjeta-tokrat-drugace-veste-naj-vam-je-storiti/"},
+    "HU": {"scheme": "vignette", "priceEur": 14.05, "original": "5550 HUF", "product": "1 день", "classes": [0, 1], "confirmed": true,
+           "source": "https://vintrica.com/hu/blog/matrica-magyarorszag-2026-arak/"},
+    "RO": {"scheme": "vignette", "priceEur": 5.15, "original": "около 26 RON", "product": "1 день", "classes": [0, 1, 2], "confirmed": false,
+           "source": "https://www.cotidianul.ro/poluatorul-plateste-de-la-1-octombrie-rovinieta-se-scumpeste-si-tine-cont-de-norma-euro/"},
+    "BG": {"scheme": "vignette", "priceEur": 5.30, "product": "1 день", "classes": [0, 1, 2], "confirmed": false,
+           "source": "https://nakordoni.eu/en/news/2026-08-01/bolhariia-onovyla-taryfy-na-elektronni-vinietky-dlia-lehkovykh-avto-z-1-serpnia-2026-roku"},
+    "FR": {"scheme": "distance", "perKm": 0.112, "confirmed": false,
+           "source": "https://www.data.gouv.fr/datasets/tarifs-autoroutes-aprr"},
+    "IT": {"scheme": "distance", "perKm": 0.08, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
+    "ES": {"scheme": "distance", "perKm": 0.10, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
+    "PT": {"scheme": "distance", "perKm": 0.085, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
+    "HR": {"scheme": "distance", "perKm": 0.07, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
+    "GR": {"scheme": "distance", "perKm": 0.045, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
+    "PL": {"scheme": "distance", "perKm": 0.115, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"}
+  }
+}

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'countries.dart';
 import 'geo.dart';
 import 'prefs.dart';
 
@@ -34,7 +35,9 @@ class WayInfo {
   final String name, ref, operator;
   final bool toll;
   final int fwd, bwd; // лимиты, км/ч
-  const WayInfo(this.cls, this.link, this.dir, this.name, this.ref, this.operator, this.toll, this.fwd, this.bwd);
+  final bool hasMaxspeed; // false — лимит взят по умолчанию
+  const WayInfo(this.cls, this.link, this.dir, this.name, this.ref, this.operator, this.toll, this.fwd, this.bwd,
+      {this.hasMaxspeed = true});
 }
 
 /// Компактный набор путей (результат одного запроса к OSM).
@@ -86,7 +89,8 @@ WayInfo? wayInfoFromTags(Map<String, dynamic> t) {
     dir = 1;
   }
   final def = link ? (defaultSpeed[cls] < 50 ? defaultSpeed[cls] : 50) : defaultSpeed[cls];
-  final base = parseMaxspeed(t['maxspeed']) ?? def;
+  final tagged = parseMaxspeed(t['maxspeed']);
+  final base = tagged ?? def;
   return WayInfo(
     cls,
     link,
@@ -97,6 +101,7 @@ WayInfo? wayInfoFromTags(Map<String, dynamic> t) {
     t['toll'] == 'yes' || t['toll:motor_vehicle'] == 'yes',
     parseMaxspeed(t['maxspeed:forward']) ?? base,
     parseMaxspeed(t['maxspeed:backward']) ?? base,
+    hasMaxspeed: tagged != null || t['maxspeed:forward'] != null,
   );
 }
 
@@ -111,6 +116,9 @@ class RoadGraph {
   final Uint8List speed; // лимит км/ч
   final Uint8List cls;
   final Uint8List toll; // 0/1
+  final Uint8List country; // индекс страны + 1 (0 — неизвестно/море)
+  final List<String> countryIso; // индекс страны → ISO
+  final int droppedNonEu; // сколько рёбер отброшено как лежащие вне ЕС
   final Int32List nameIdx, refIdx, opIdx;
   final List<String> strings;
   // геометрия рёбер: точки [ptStart[e], ptStart[e+1]) в ptLat/ptLon
@@ -118,7 +126,7 @@ class RoadGraph {
   final Float64List ptLat, ptLon;
 
   RoadGraph._(this.nodeCount, this.edgeCount, this.lat, this.lon, this.outStart, this.outEdges, this.inStart,
-      this.inEdges, this.from, this.to, this.len, this.speed, this.cls, this.toll, this.nameIdx, this.refIdx, this.opIdx,
+      this.inEdges, this.from, this.to, this.len, this.speed, this.cls, this.toll, this.country, this.countryIso, this.droppedNonEu, this.nameIdx, this.refIdx, this.opIdx,
       this.strings, this.ptStart, this.ptLat, this.ptLon);
 
   static final empty = RoadGraph.build(const []);
@@ -126,9 +134,13 @@ class RoadGraph {
   String edgeName(int e) => strings[nameIdx[e]];
   String edgeRef(int e) => strings[refIdx[e]];
   String edgeOperator(int e) => strings[opIdx[e]];
+  String edgeCountry(int e) => country[e] == 0 ? '' : countryIso[country[e] - 1];
 
   /// Строит граф из наборов путей (дубликаты путей из разных запросов отбрасываются).
-  static RoadGraph build(List<WayData> chunks) {
+  /// С [countries] каждому ребру назначается страна, а рёбра в странах вне ЕС отбрасываются.
+  static RoadGraph build(List<WayData> chunks, {CountryIndex? countries}) {
+    final ci = (countries == null || countries.isEmpty) ? null : countries;
+    var dropped = 0;
     final seen = <int>{};
     final count = <int, int>{};
     // 1) подсчёт использования узлов — перекрёстки там, где узел встречается более одного раза
@@ -161,7 +173,7 @@ class RoadGraph {
 
     final eFrom = I32Buf(), eTo = I32Buf(), eName = I32Buf(), eRef = I32Buf(), eOp = I32Buf(), ePtStart = I32Buf();
     final eLen = F64Buf(), pLat = F64Buf(), pLon = F64Buf();
-    final eSpeed = <int>[], eCls = <int>[], eToll = <int>[];
+    final eSpeed = <int>[], eCls = <int>[], eToll = <int>[], eCountry = <int>[];
     final strings = <String>[''];
     final stringIdx = <String, int>{'': 0};
     int str(String s) => stringIdx.putIfAbsent(s, () {
@@ -175,6 +187,26 @@ class RoadGraph {
         len += haversine(la[i - 1], lo[i - 1], la[i], lo[i]);
       }
       if (len <= 0) return;
+      var cIdx = 0;
+      if (ci != null) {
+        // страна вне ЕС: проверяем концы и точки примерно через километр
+        var acc = 1e9;
+        for (var i = 0; i < la.length; i++) {
+          if (i > 0) acc += haversine(la[i - 1], lo[i - 1], la[i], lo[i]);
+          if (acc >= 1000 || i == la.length - 1) {
+            acc = 0;
+            if (ci.isDeepNonEu(la[i], lo[i])) {
+              dropped++;
+              return;
+            }
+          }
+        }
+        final m = la.length ~/ 2;
+        cIdx = ci.countryAt(la[m], lo[m]) + 1;
+        if (cIdx > 0 && !info.hasMaxspeed && info.cls == 0 && !info.link) {
+          speed = motorwayDefaultByCountry[ci.iso[cIdx - 1]] ?? speed;
+        }
+      }
       ePtStart.add(pLat.length);
       if (reversed) {
         for (var i = la.length - 1; i >= 0; i--) {
@@ -193,6 +225,7 @@ class RoadGraph {
       eSpeed.add(speed.clamp(1, 255));
       eCls.add(info.cls);
       eToll.add(info.toll ? 1 : 0);
+      eCountry.add(cIdx);
       eName.add(str(info.name));
       eRef.add(str(info.ref));
       eOp.add(str(info.operator));
@@ -261,6 +294,9 @@ class RoadGraph {
       Uint8List.fromList(eSpeed),
       Uint8List.fromList(eCls),
       Uint8List.fromList(eToll),
+      Uint8List.fromList(eCountry),
+      ci?.iso ?? const [],
+      dropped,
       eName.take(),
       eRef.take(),
       eOp.take(),
@@ -278,6 +314,7 @@ class RoadGraph {
     final dLat = maxMeters / 111000 + 1e-6;
     for (var i = 0; i < nodeCount; i++) {
       if ((lat[i] - la).abs() > dLat) continue;
+      if (outStart[i + 1] == outStart[i] && inStart[i + 1] == inStart[i]) continue; // узел без рёбер
       final d = haversine(la, lo, lat[i], lon[i]);
       if (d > maxMeters) continue;
       if (best.length < count || d < best.last.d) {

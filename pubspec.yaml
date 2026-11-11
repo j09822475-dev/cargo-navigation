@@ -67,6 +67,7 @@ flutter:
   # Тарифы платных дорог (см. tool/README.md)
   assets:
     - assets/tariffs/
+    - assets/geo/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -2,34 +2,35 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../core/geo.dart';
-import '../core/prefs.dart';
 import '../core/route_data.dart';
 import 'app_state.dart';
 import 'format.dart';
 import 'geocoder.dart';
-import 'settings_page.dart';
+import 'search_page.dart';
 
+const _blue = Color(0xFF1A73E8);
+const _green = Color(0xFF188038);
+const _navGreen = Color(0xFF0B6B3A);
+const _tollOrange = Color(0xFFF29900);
+
+/// Главный экран в духе Google Карт: карта, строка поиска, карточка маршрута, ведение по маршруту.
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.state, Geocoder? geocoder}) : _geocoder = geocoder; // ignore: prefer_initializing_formals
+  const HomePage({super.key, required this.state, this.geocoder});
   final AppState state;
-  final Geocoder? _geocoder;
+  final Geocoder? geocoder;
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
   final MapController _map = MapController();
-  final _fromCtl = TextEditingController(), _toCtl = TextEditingController();
-  final _fromFocus = FocusNode(), _toFocus = FocusNode();
-  late final Geocoder _geo = widget._geocoder ?? Geocoder();
-  List<Place> _suggest = const [];
-  bool _suggestForStart = true;
-  bool? _pickStart; // режим выбора точки на карте
+  late final Geocoder _geo = widget.geocoder ?? Geocoder();
   String? _fitted; // чтобы не перенацеливать карту на каждую перерисовку
+  bool _showSteps = false;
+  bool _wasNav = false;
   AppState get s => widget.state;
 
   @override
@@ -41,27 +42,29 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     s.removeListener(_sync);
-    _fromCtl.dispose();
-    _toCtl.dispose();
-    _fromFocus.dispose();
-    _toFocus.dispose();
     super.dispose();
   }
 
   void _sync() {
-    if (!_fromFocus.hasFocus && _fromCtl.text != s.startLabel) _fromCtl.text = s.startLabel;
-    if (!_toFocus.hasFocus && _toCtl.text != s.endLabel) _toCtl.text = s.endLabel;
     final r = s.route;
-    if (r != null && s.nav == null) {
+    final nav = s.nav;
+    if (nav != null && nav.position != null) {
+      _wasNav = true;
+      // камера следует за машиной, карта повёрнута по ходу движения
+      _map.moveAndRotate(LatLng(nav.position!.lat, nav.position!.lon), math.max(_map.camera.zoom, 15.5), -nav.heading);
+      return;
+    }
+    if (nav == null && _wasNav) {
+      _wasNav = false;
+      _fitted = null;
+      _map.rotate(0);
+    }
+    if (r != null && nav == null) {
       final key = '${s.routes.length}-${r.pts.length}-${r.meters.round()}';
       if (key != _fitted) {
         _fitted = key;
         WidgetsBinding.instance.addPostFrameCallback((_) => _fit(r));
       }
-    }
-    final nav = s.nav;
-    if (nav != null && nav.position != null) {
-      _map.move(LatLng(nav.position!.lat, nav.position!.lon), math.max(_map.camera.zoom, 15));
     }
   }
 
@@ -78,80 +81,45 @@ class _HomePageState extends State<HomePage> {
     final h = MediaQuery.of(context).size.height;
     _map.fitCamera(CameraFit.bounds(
       bounds: LatLngBounds(LatLng(s0, w0), LatLng(n0, e0)),
-      padding: EdgeInsets.fromLTRB(32, 150, 32, h * 0.42),
+      padding: EdgeInsets.fromLTRB(40, 170, 40, h * 0.42),
       maxZoom: 16,
     ));
   }
 
-  Future<void> _search(bool forStart) async {
-    final ctl = forStart ? _fromCtl : _toCtl;
-    final q = ctl.text.trim();
-    if (q.isEmpty) return;
-    try {
-      final res = await _geo.search(q);
-      if (!mounted) return;
-      if (res.isEmpty) {
-        _snack('Адрес не найден');
-        return;
-      }
-      if (res.length == 1) {
-        _pick(forStart, res.first);
-      } else {
-        setState(() {
-          _suggest = res;
-          _suggestForStart = forStart;
-        });
-      }
-    } catch (e) {
-      _snack('$e');
-    }
-  }
-
-  void _pick(bool forStart, Place p) {
-    setState(() => _suggest = const []);
-    FocusScope.of(context).unfocus(); // сначала снимаем фокус, чтобы поле показало найденный адрес
-    s.setPoint(isStart: forStart, pos: p.pos, label: p.title);
-    _map.move(LatLng(p.pos.lat, p.pos.lon), 13);
-  }
-
   void _snack(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
 
-  Future<void> _locate() async {
-    try {
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
-        _snack('Нет доступа к геолокации');
-        return;
-      }
-      final p = await Geolocator.getCurrentPosition();
-      s.setPoint(isStart: true, pos: LatLon(p.latitude, p.longitude), label: 'Моё местоположение');
-      _map.move(LatLng(p.latitude, p.longitude), 14);
-    } catch (e) {
-      _snack('Не удалось определить местоположение');
+  Future<void> _openSearch({required bool forStart}) async {
+    final res = await Navigator.of(context).push(MaterialPageRoute<SearchResult>(
+      builder: (_) => SearchPage(
+        geocoder: _geo,
+        forStart: forStart,
+        hint: forStart ? 'Откуда' : 'Куда едем?',
+      ),
+    ));
+    if (res == null || !mounted) return;
+    setState(() => _showSteps = false);
+    if (res.demo) {
+      s.startDemo();
+    } else if (res.myLocation) {
+      s.setStart(null);
+    } else if (forStart) {
+      s.setStart(res.place!.pos, label: res.place!.title);
+    } else {
+      _map.move(LatLng(res.place!.pos.lat, res.place!.pos.lon), 12);
+      s.setDestination(res.place!.pos, label: res.place!.title);
     }
   }
 
-  void _onMapTap(LatLng ll) {
-    final pos = LatLon(ll.latitude, ll.longitude);
-    final forStart = _pickStart ?? (s.start == null ? true : (s.end == null ? false : null));
-    if (forStart == null) return;
-    s.setPoint(isStart: forStart, pos: pos);
-    setState(() => _pickStart = null);
-  }
-
-  Future<void> _onMapLongPress(LatLng ll) async {
-    final pos = LatLon(ll.latitude, ll.longitude);
-    final choice = await showModalBottomSheet<bool>(
-      context: context,
-      builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.trip_origin, color: Colors.green), title: const Text('Отсюда (точка А)'), onTap: () => Navigator.pop(c, true)),
-          ListTile(leading: const Icon(Icons.place, color: Colors.red), title: const Text('Сюда (точка Б)'), onTap: () => Navigator.pop(c, false)),
-        ]),
-      ),
-    );
-    if (choice != null) s.setPoint(isStart: choice, pos: pos);
+  Future<void> _locateMe() async {
+    final p = await s.locate?.call();
+    if (!mounted) return;
+    if (p == null) {
+      _snack('Не удалось определить местоположение');
+      return;
+    }
+    s.myLocation = p;
+    _map.moveAndRotate(LatLng(p.lat, p.lon), 14, 0);
+    setState(() {});
   }
 
   @override
@@ -164,11 +132,15 @@ class _HomePageState extends State<HomePage> {
           resizeToAvoidBottomInset: false,
           body: Stack(children: [
             _mapView(),
-            if (nav == null) ...[
-              _topPanel(),
-              _sheet(),
-            ] else
-              _navOverlay(),
+            if (nav != null)
+              _navOverlay()
+            else if (!s.hasDestination) ...[
+              _searchPill(),
+              _locateFab(24),
+            ] else ...[
+              _directionsHeader(),
+              _routeSheet(),
+            ],
           ]),
         );
       },
@@ -184,55 +156,76 @@ class _HomePageState extends State<HomePage> {
     ];
     if (r != null) {
       for (var i = 0; i < s.routes.length; i++) {
-        if (i == s.selected) continue;
+        if (i == s.selected || nav != null) continue;
         layers.add(PolylineLayer(simplificationTolerance: 0.5, polylines: [
-          Polyline(points: _points(s.routes[i], 0, s.routes[i].pointCount - 1), strokeWidth: 5, color: Colors.blueGrey.withValues(alpha: 0.6)),
+          Polyline(
+              points: _points(s.routes[i], 0, s.routes[i].pointCount - 1),
+              strokeWidth: 6,
+              color: const Color(0xFFBCC8DC),
+              borderStrokeWidth: 1.5,
+              borderColor: const Color(0xFF8A9BB8)),
         ]));
       }
       layers.add(PolylineLayer(simplificationTolerance: 0.5, polylines: [
-        Polyline(
-            points: _points(r, 0, r.pointCount - 1), strokeWidth: 7, color: const Color(0xFF1A73E8), borderStrokeWidth: 3, borderColor: Colors.white),
+        Polyline(points: _points(r, 0, r.pointCount - 1), strokeWidth: 7, color: _blue, borderStrokeWidth: 2, borderColor: const Color(0xFF1558B0)),
         ..._tollLines(r),
       ]));
     }
+    final start = s.start ?? s.myLocation;
     layers.add(MarkerLayer(markers: [
-      if (s.start != null) _pin(s.start!, Colors.green, 'А'),
-      if (s.end != null) _pin(s.end!, Colors.red, 'Б'),
+      if (nav == null && start != null && s.hasDestination)
+        Marker(
+          point: LatLng(start.lat, start.lon),
+          width: 18,
+          height: 18,
+          child: Container(decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: Colors.black87, width: 4))),
+        ),
+      if (nav == null && !s.hasDestination && s.myLocation != null) _blueDot(s.myLocation!),
+      if (s.end != null)
+        Marker(
+          point: LatLng(s.end!.lat, s.end!.lon),
+          width: 40,
+          height: 40,
+          alignment: Alignment.topCenter,
+          rotate: true,
+          child: const Icon(Icons.location_on, color: Color(0xFFEA4335), size: 40),
+        ),
       if (nav?.position != null)
         Marker(
           point: LatLng(nav!.position!.lat, nav.position!.lon),
-          width: 24,
-          height: 24,
-          child: Container(decoration: BoxDecoration(color: const Color(0xFF1A73E8), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black38)])),
+          width: 44,
+          height: 44,
+          rotate: true,
+          child: Container(
+            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(blurRadius: 6, color: Colors.black38)]),
+            child: const Icon(Icons.navigation, color: _blue, size: 30),
+          ),
         ),
     ]));
     return FlutterMap(
       mapController: _map,
       options: MapOptions(
-        initialCenter: const LatLng(55.75, 37.62),
-        initialZoom: 9,
-        onTap: (_, ll) => _onMapTap(ll),
-        onLongPress: (_, ll) => _onMapLongPress(ll),
+        initialCenter: const LatLng(49.5, 10.5),
+        initialZoom: 5,
+        onLongPress: (_, ll) {
+          if (s.nav == null) s.setDestination(LatLon(ll.latitude, ll.longitude), label: 'Точка на карте');
+        },
       ),
       children: layers,
     );
   }
 
-  Marker _pin(LatLon p, Color c, String t) => Marker(
+  Marker _blueDot(LatLon p) => Marker(
         point: LatLng(p.lat, p.lon),
-        width: 30,
-        height: 30,
-        child: Container(
-          alignment: Alignment.center,
-          decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black45)]),
-          child: Text(t, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-        ),
+        width: 22,
+        height: 22,
+        child: Container(decoration: BoxDecoration(color: _blue, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black38)])),
       );
 
   List<LatLng> _points(RouteData r, int from, int to) =>
       [for (var i = from; i <= to; i++) LatLng(r.pts[2 * i], r.pts[2 * i + 1])];
 
-  /// Платные участки — оранжевым поверх маршрута.
+  /// Участки с платой за километр — оранжевым поверх маршрута.
   List<Polyline> _tollLines(RouteData r) {
     final out = <Polyline>[];
     int? runStart;
@@ -240,253 +233,263 @@ class _HomePageState extends State<HomePage> {
       final toll = k < r.edgeCount && r.edgeToll[k] == 1;
       if (toll && runStart == null) runStart = r.edgeStartPt[k];
       if (!toll && runStart != null) {
-        out.add(Polyline(points: _points(r, runStart, r.edgeStartPt[k]), strokeWidth: 7, color: const Color(0xFFF59E0B)));
+        out.add(Polyline(points: _points(r, runStart, r.edgeStartPt[k]), strokeWidth: 7, color: _tollOrange));
         runStart = null;
       }
     }
     return out;
   }
 
-  // ---------- верхняя панель ----------
-  Widget _topPanel() {
+  // ---------- пустая карта: строка поиска ----------
+  Widget _searchPill() {
+    final scheme = Theme.of(context).colorScheme;
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Card(
-            elevation: 6,
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+        child: Material(
+          elevation: 4,
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(28),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(28),
+            onTap: () => _openSearch(forStart: false),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-              child: Column(children: [
-                _field(true, _fromCtl, 'Откуда (адрес или координаты)', Icons.my_location, _locate),
-                const SizedBox(height: 6),
-                _field(false, _toCtl, 'Куда', Icons.swap_vert, s.swap),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(children: [
+                const Icon(Icons.search, color: _blue),
+                const SizedBox(width: 12),
+                Expanded(child: Text('Куда едем?', style: TextStyle(fontSize: 17, color: scheme.onSurfaceVariant))),
+                Icon(Icons.directions, color: scheme.onSurfaceVariant),
               ]),
             ),
           ),
-          if (_suggest.isNotEmpty)
-            Card(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 220),
-                child: ListView(shrinkWrap: true, padding: EdgeInsets.zero, children: [
-                  for (final p in _suggest)
-                    ListTile(dense: true, title: Text(p.title, maxLines: 2, overflow: TextOverflow.ellipsis), onTap: () => _pick(_suggestForStart, p)),
-                ]),
-              ),
+        ),
+      ),
+    );
+  }
+
+  Widget _locateFab(double bottom) => Positioned(
+        right: 16,
+        bottom: bottom,
+        child: SafeArea(
+          child: FloatingActionButton(
+            heroTag: 'locate',
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            foregroundColor: _blue,
+            shape: const CircleBorder(),
+            onPressed: _locateMe,
+            child: const Icon(Icons.my_location),
+          ),
+        ),
+      );
+
+  // ---------- маршрут: шапка «откуда → куда» ----------
+  Widget _directionsHeader() {
+    final scheme = Theme.of(context).colorScheme;
+    Widget field(String text, VoidCallback onTap) => Expanded(
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(border: Border.all(color: scheme.outlineVariant), borderRadius: BorderRadius.circular(8)),
+              child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15)),
             ),
-        ]),
-      ),
-    );
-  }
-
-  Widget _field(bool isStart, TextEditingController c, String hint, IconData actionIcon, VoidCallback action) {
-    return Row(children: [
-      CircleAvatar(radius: 11, backgroundColor: isStart ? Colors.green : Colors.red, child: Text(isStart ? 'А' : 'Б', style: const TextStyle(fontSize: 11, color: Colors.white))),
-      const SizedBox(width: 8),
-      Expanded(
-        child: TextField(
-          controller: c,
-          focusNode: isStart ? _fromFocus : _toFocus,
-          decoration: InputDecoration(hintText: hint, isDense: true, border: InputBorder.none),
-          textInputAction: TextInputAction.search,
-          onSubmitted: (_) => _search(isStart),
-          onChanged: (_) => setState(() => _suggest = const []),
-        ),
-      ),
-      IconButton(
-        tooltip: 'Выбрать на карте',
-        icon: Icon(Icons.push_pin, color: _pickStart == isStart ? Theme.of(context).colorScheme.primary : null),
-        onPressed: () {
-          setState(() => _pickStart = _pickStart == isStart ? null : isStart);
-          if (_pickStart != null) _snack('Коснитесь карты, чтобы поставить точку ${isStart ? 'А' : 'Б'}');
-        },
-      ),
-      IconButton(icon: Icon(actionIcon), onPressed: action),
-    ]);
-  }
-
-  // ---------- нижняя панель ----------
-  Widget _sheet() {
-    final scheme = Theme.of(context).colorScheme;
-    return DraggableScrollableSheet(
-      initialChildSize: 0.38,
-      minChildSize: 0.12,
-      maxChildSize: 0.92,
-      snap: true,
-      snapSizes: const [0.12, 0.38, 0.92],
-      builder: (context, scroll) => Material(
-        elevation: 12,
-        color: scheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        child: ListView(
-          controller: scroll,
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-          children: [
-            Center(child: Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 10), decoration: BoxDecoration(color: scheme.outlineVariant, borderRadius: BorderRadius.circular(2)))),
-            _quickSettings(),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: s.busy ? null : s.plan,
-                  icon: const Icon(Icons.alt_route),
-                  label: const Text('Построить маршрут'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                tooltip: 'Настройки',
-                icon: const Icon(Icons.tune),
-                onPressed: _openSettings,
-              ),
-            ]),
-            if (!s.demo || s.routes.isEmpty)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: () {
-                    s.startDemo();
-                    s.plan();
-                  },
-                  child: const Text('Демо без интернета'),
-                ),
-              ),
-            if (s.busy) ...[
-              const SizedBox(height: 8),
-              const LinearProgressIndicator(),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(child: Text(s.status, style: Theme.of(context).textTheme.bodySmall)),
-                TextButton(onPressed: s.cancelPlanning, child: const Text('Отмена')),
-              ]),
-            ],
-            if (s.error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(s.error!, style: TextStyle(color: scheme.error)),
-              ),
-            if (s.note != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Icon(Icons.info_outline, size: 18),
-                  const SizedBox(width: 6),
-                  Expanded(child: Text(s.note!, style: Theme.of(context).textTheme.bodySmall)),
-                ]),
-              ),
-            for (var i = 0; i < s.routes.length; i++) _routeCard(i),
-            if (s.route != null) ..._steps(s.route!),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openSettings() async {
-    final before = s.prefs.toJson().toString();
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SettingsPage(state: s)));
-    if (s.prefs.toJson().toString() != before && s.start != null && s.end != null && s.routes.isNotEmpty) s.plan();
-  }
-
-  Widget _quickSettings() {
-    final p = s.prefs;
-    void apply(void Function() f) {
-      s.updatePrefs((_) => f());
-      if (s.routes.isNotEmpty && !s.busy) s.plan();
-    }
-
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SegmentedButton<Priority>(
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(value: Priority.fastest, label: Text('Быстрее', maxLines: 1), icon: Icon(Icons.bolt, size: 18)),
-          ButtonSegment(value: Priority.cheapest, label: Text('Дешевле', maxLines: 1), icon: Icon(Icons.savings, size: 18)),
-        ],
-        selected: {p.priority},
-        onSelectionChanged: (v) => apply(() => p.priority = v.first),
-      ),
-      const SizedBox(height: 8),
-      SegmentedButton<TollMode>(
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(value: TollMode.any, label: Text('Любые', maxLines: 1), tooltip: 'Комбинировать платные и бесплатные'),
-          ButtonSegment(value: TollMode.free, label: Text('Бесплатные', maxLines: 1), tooltip: 'Только бесплатные дороги'),
-          ButtonSegment(value: TollMode.prefer, label: Text('Платные', maxLines: 1), tooltip: 'Предпочитать платные дороги'),
-        ],
-        selected: {p.tollMode},
-        onSelectionChanged: (v) => apply(() => p.tollMode = v.first),
-      ),
-    ]);
-  }
-
-  Widget _routeCard(int i) {
-    final r = s.routes[i];
-    final fast = s.routes.reduce((a, b) => b.hours < a.hours ? b : a);
-    final selected = i == s.selected;
-    final scheme = Theme.of(context).colorScheme;
-    const tagNames = {'best': 'По вашему приоритету', 'fastest': 'Самый быстрый', 'cheapest': 'Меньше платных дорог'};
-    const tagOrder = ['best', 'fastest', 'cheapest'];
-    return Card(
-      margin: const EdgeInsets.only(top: 10),
-      color: selected ? scheme.primaryContainer.withValues(alpha: 0.5) : null,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: selected ? scheme.primary : scheme.outlineVariant, width: selected ? 2 : 1)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => s.select(i),
+          ),
+        );
+    return Material(
+      elevation: 4,
+      color: scheme.surface,
+      child: SafeArea(
+        bottom: false,
         child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Wrap(spacing: 6, runSpacing: 4, children: [
-              for (final t in tagOrder)
-                if (r.tags.contains(t))
-                  Chip(
-                    label: Text(tagNames[t]!, style: const TextStyle(fontSize: 11, color: Colors.white)),
-                    backgroundColor: t == 'fastest' ? Colors.red.shade400 : t == 'cheapest' ? Colors.green.shade600 : scheme.primary,
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    side: BorderSide.none,
-                  ),
-            ]),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(fmtTime(r.hours), style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-              Text(r.tollCost > 0 ? fmtMoney(r.tollCost) : 'Бесплатно', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-            ]),
-            Text('${fmtDist(r.meters)}${identical(r, fast) ? '' : ' · +${fmtTime(r.hours - fast.hours)} к самому быстрому'}',
-                style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 2),
-            Text.rich(TextSpan(children: [
-              if (r.tollMeters > 0)
-                TextSpan(text: 'Платные дороги: ${fmtDist(r.tollMeters)} — ${fmtMoney(r.tollCost)}', style: const TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.w600))
-              else
-                const TextSpan(text: 'Без платных дорог'),
-            ]), style: Theme.of(context).textTheme.bodySmall),
-            if (r.tollMeters > 0)
-              Text(_tariffNote(r), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor)),
-            if (selected)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Row(children: [
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: Colors.green.shade600),
-                    onPressed: () => s.startNavigation(),
-                    icon: const Icon(Icons.navigation),
-                    label: const Text('Поехали'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(onPressed: () => s.startNavigation(simulate: true), child: const Text('Симуляция')),
-                ]),
-              ),
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            IconButton(icon: const Icon(Icons.arrow_back), tooltip: 'Назад', onPressed: s.clear),
+            Padding(
+              padding: const EdgeInsets.only(top: 14, right: 8),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.trip_origin, size: 16, color: _blue),
+                for (var i = 0; i < 3; i++) Container(width: 3, height: 3, margin: const EdgeInsets.symmetric(vertical: 3), decoration: BoxDecoration(color: scheme.outline, shape: BoxShape.circle)),
+                const Icon(Icons.location_on, size: 18, color: Color(0xFFEA4335)),
+              ]),
+            ),
+            Expanded(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Row(children: [field(s.startTitle, () => _openSearch(forStart: true))]),
+                const SizedBox(height: 8),
+                Row(children: [field(s.endLabel, () => _openSearch(forStart: false))]),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 26),
+              child: IconButton(icon: const Icon(Icons.swap_vert), tooltip: 'Поменять местами', onPressed: s.busy ? null : s.swap),
+            ),
           ]),
         ),
       ),
     );
   }
 
-  /// Откуда взята цена платных участков: тарифы операторов или ваша ставка из настроек.
-  String _tariffNote(RouteData r) {
-    if (r.tollKnownMeters <= 0) return 'Оценка по вашей ставке из настроек (тарифов оператора для этих дорог нет)';
-    if (r.tollKnownMeters >= r.tollMeters - 1) return 'Цена по тарифам операторов';
-    return 'По тарифам операторов: ${fmtDist(r.tollKnownMeters)} из ${fmtDist(r.tollMeters)}, остальное — по вашей ставке';
+  // ---------- маршрут: нижняя карточка ----------
+  String _costLine(RouteData r) {
+    if (r.money <= 0) return 'Без платных дорог';
+    return 'Платные дороги: ${r.estimated ? '≈ ' : ''}${fmtMoney(r.money)}';
+  }
+
+  Widget _routeSheet() {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final r = s.route;
+    return DraggableScrollableSheet(
+      initialChildSize: 0.36,
+      minChildSize: 0.16,
+      maxChildSize: 0.9,
+      snap: true,
+      snapSizes: const [0.16, 0.36, 0.9],
+      builder: (context, scroll) => Material(
+        elevation: 12,
+        color: scheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        child: ListView(
+          controller: scroll,
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+          children: [
+            Center(child: Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: scheme.outlineVariant, borderRadius: BorderRadius.circular(2)))),
+            if (s.busy) ...[
+              Text('Строю маршрут', style: text.titleMedium),
+              const SizedBox(height: 10),
+              const LinearProgressIndicator(),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: Text(s.status, style: text.bodySmall)),
+                TextButton(onPressed: s.cancelPlanning, child: const Text('Отмена')),
+              ]),
+            ],
+            if (s.error != null) ...[
+              Text(s.error!, style: TextStyle(color: scheme.error, fontSize: 15)),
+              const SizedBox(height: 10),
+              Align(alignment: Alignment.centerLeft, child: OutlinedButton(onPressed: s.plan, child: const Text('Повторить'))),
+            ],
+            if (r != null) ...[
+              Text.rich(TextSpan(children: [
+                TextSpan(text: fmtTime(r.hours), style: TextStyle(fontSize: 26, fontWeight: FontWeight.w600, color: r.weatherDelayHours > 0.02 ? const Color(0xFFD56E0C) : _green)),
+                TextSpan(text: '  (${fmtDist(r.meters)})', style: TextStyle(fontSize: 20, color: scheme.onSurfaceVariant)),
+              ])),
+              const SizedBox(height: 2),
+              Text(_headline(r), style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
+              const SizedBox(height: 12),
+              Row(children: [
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: _blue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12)),
+                  onPressed: () => s.startNavigation(),
+                  icon: const Icon(Icons.navigation),
+                  label: const Text('В путь'),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
+                  onPressed: () => setState(() => _showSteps = !_showSteps),
+                  icon: const Icon(Icons.list),
+                  label: const Text('Шаги'),
+                ),
+                if (s.demo) ...[
+                  const SizedBox(width: 10),
+                  Chip(label: const Text('Демо'), visualDensity: VisualDensity.compact, side: BorderSide(color: scheme.outlineVariant)),
+                ],
+              ]),
+              const SizedBox(height: 14),
+              ..._costDetails(r),
+              for (final w in r.warnings) _infoRow(Icons.warning_amber_rounded, w, const Color(0xFFD56E0C)),
+              if (s.note != null) _infoRow(Icons.info_outline, s.note!, scheme.onSurfaceVariant),
+              if (s.routes.length > 1) ...[
+                const Divider(height: 26),
+                Text('Варианты маршрута', style: text.titleSmall),
+                for (var i = 0; i < s.routes.length; i++) _routeTile(i),
+              ],
+              if (_showSteps) ..._steps(r),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _headline(RouteData r) {
+    final parts = <String>[
+      if (r.tags.contains('best') && r.tags.contains('fastest'))
+        'Самый быстрый маршрут'
+      else if (r.tags.contains('best'))
+        'Оптимальный маршрут'
+      else if (r.tags.contains('fastest'))
+        'Самый быстрый маршрут'
+      else if (r.tags.contains('free'))
+        'Маршрут без платных дорог'
+      else
+        'Альтернативный маршрут',
+      _costLine(r).toLowerCase(),
+    ];
+    return parts.join(' · ');
+  }
+
+  Widget _infoRow(IconData icon, String t, Color color) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(child: Text(t, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color))),
+        ]),
+      );
+
+  /// Из чего складывается стоимость дороги.
+  List<Widget> _costDetails(RouteData r) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final out = <Widget>[];
+    if (r.tollMeters > 1) {
+      final est = r.tollMeters - r.tollOperatorMeters > 1;
+      out.add(_infoRow(Icons.toll, 'Плата за проезд: ${est ? '≈ ' : ''}${fmtMoney(r.distanceToll)} за ${fmtDist(r.tollMeters)}'
+          '${est ? ' (средняя ставка по стране — оценка)' : ' (тариф оператора)'}', _tollOrange));
+    }
+    for (final v in r.vignettes) {
+      out.add(_infoRow(Icons.confirmation_number_outlined,
+          'Виньетка, ${countryNamesRu[v.iso] ?? v.iso} (${v.product}): ${v.confirmed ? '' : '≈ '}${fmtMoney(v.priceEur)}'
+          '${v.confirmed ? '' : ' — цена требует проверки'}', muted));
+    }
+    return out;
+  }
+
+  Widget _routeTile(int i) {
+    final r = s.routes[i];
+    final scheme = Theme.of(context).colorScheme;
+    final selected = i == s.selected;
+    final label = r.tags.contains('best')
+        ? 'Оптимальный'
+        : r.tags.contains('fastest')
+            ? 'Самый быстрый'
+            : r.tags.contains('free')
+                ? 'Без платных дорог'
+                : 'Альтернатива';
+    return InkWell(
+      onTap: () => s.select(i),
+      child: Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? _blue.withValues(alpha: 0.08) : null,
+          border: Border.all(color: selected ? _blue : scheme.outlineVariant, width: selected ? 2 : 1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text('${fmtDist(r.meters)} · ${_costLine(r)}', style: Theme.of(context).textTheme.bodySmall),
+            ]),
+          ),
+          Text(fmtTime(r.hours), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: _green)),
+        ]),
+      ),
+    );
   }
 
   static const _icons = {
@@ -503,8 +506,8 @@ class _HomePageState extends State<HomePage> {
   };
 
   List<Widget> _steps(RouteData r) => [
-        const SizedBox(height: 16),
-        Text('Маршрут по шагам', style: Theme.of(context).textTheme.titleSmall),
+        const Divider(height: 26),
+        Text('Шаги', style: Theme.of(context).textTheme.titleSmall),
         for (final st in r.steps)
           ListTile(
             dense: true,
@@ -512,18 +515,19 @@ class _HomePageState extends State<HomePage> {
             leading: Icon(_icons[st.type]),
             title: Text.rich(TextSpan(children: [
               TextSpan(text: st.text),
-              if (st.toll) const TextSpan(text: ' · платная', style: TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.w600)),
+              if (st.toll) const TextSpan(text: ' · платная', style: TextStyle(color: _tollOrange, fontWeight: FontWeight.w600)),
             ])),
             subtitle: st.meters > 0 ? Text('${fmtDist(st.meters)} · лимит ${st.speed} км/ч') : null,
           ),
       ];
 
-  // ---------- навигация ----------
+  // ---------- ведение по маршруту ----------
   Widget _navOverlay() {
     final nav = s.nav!;
     final scheme = Theme.of(context).colorScheme;
     final r = s.route!;
     final next = nav.next;
+    final remainH = r.hours * nav.remainingFraction;
     return Stack(children: [
       SafeArea(
         child: Align(
@@ -531,54 +535,69 @@ class _HomePageState extends State<HomePage> {
           child: Padding(
             padding: const EdgeInsets.all(10),
             child: Material(
-              color: const Color(0xFF0B5CD5),
+              color: _navGreen,
               elevation: 8,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(18),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                 child: Row(children: [
-                  Icon(_icons[next?.type] ?? Icons.navigation, color: Colors.white, size: 38),
-                  const SizedBox(width: 12),
+                  Icon(_icons[next?.type] ?? Icons.navigation, color: Colors.white, size: 46),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: nav.error != null
-                        ? Text(nav.error!, style: const TextStyle(color: Colors.white))
+                        ? Text(nav.error!, style: const TextStyle(color: Colors.white, fontSize: 16))
                         : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(fmtDist(nav.toNext), style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
-                            Text(next?.text ?? '', style: const TextStyle(color: Colors.white), maxLines: 2, overflow: TextOverflow.ellipsis),
+                            Text(fmtDist(nav.toNext), style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700)),
+                            Text(next?.text ?? '', style: const TextStyle(color: Colors.white, fontSize: 16), maxLines: 2, overflow: TextOverflow.ellipsis),
                           ]),
                   ),
-                  Container(
-                    width: 48,
-                    height: 48,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white, border: Border.all(color: Colors.red, width: 5)),
-                    child: Text('${nav.limit}', style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.black)),
-                  ),
-                  IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: s.stopNavigation),
                 ]),
               ),
             ),
           ),
         ),
       ),
-      SafeArea(
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Material(
-              color: scheme.surface,
-              elevation: 8,
-              borderRadius: BorderRadius.circular(40),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                child: Text(
-                  nav.arrived
-                      ? 'Вы прибыли в пункт назначения'
-                      : 'Осталось ${fmtDist(nav.remaining)} · ${fmtTime(r.hours * nav.remainingFraction)}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+      // знак ограничения скорости
+      Positioned(
+        left: 14,
+        bottom: 110,
+        child: SafeArea(
+          child: Container(
+            width: 54,
+            height: 54,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white, border: Border.all(color: const Color(0xFFD93025), width: 6), boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black38)]),
+            child: Text('${nav.limit}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: Colors.black)),
+          ),
+        ),
+      ),
+      Align(
+        alignment: Alignment.bottomCenter,
+        child: Material(
+          color: scheme.surface,
+          elevation: 12,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+              child: Row(children: [
+                Material(
+                  color: const Color(0xFFD93025),
+                  shape: const CircleBorder(),
+                  child: IconButton(icon: const Icon(Icons.close, color: Colors.white), tooltip: 'Завершить', onPressed: s.stopNavigation),
                 ),
-              ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: nav.arrived
+                      ? const Text('Вы прибыли', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: _green))
+                      : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+                          Text(fmtTime(remainH), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: _green)),
+                          Text('${fmtDist(nav.remaining)} · ${fmtEta(remainH, DateTime.now())}', style: TextStyle(fontSize: 15, color: scheme.onSurfaceVariant)),
+                        ]),
+                ),
+                const SizedBox(width: 56),
+              ]),
             ),
           ),
         ),

@@ -1,25 +1,27 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/geo.dart';
-import '../core/prefs.dart';
 import '../core/route_data.dart';
 import '../engine/demo_source.dart';
 import '../engine/routing_service.dart';
 import 'nav_controller.dart';
 
+/// Определение текущего местоположения (null — недоступно).
+typedef LocateFn = Future<LatLon?> Function();
+
+/// Состояние приложения. Настроек нет: пользователь задаёт только точки.
 class AppState extends ChangeNotifier {
-  AppState(this._plan, {this.cancel});
+  AppState(this._plan, {this.cancel, this.locate});
 
   final PlanFn _plan;
   final VoidCallback? cancel;
-  static const _prefsKey = 'route_prefs_v3';
+  final LocateFn? locate;
 
-  RoutePrefs prefs = RoutePrefs();
-  LatLon? start, end;
+  /// Точка отправления; null — «Моё местоположение» (определяется при построении).
+  LatLon? start;
+  LatLon? end;
   String startLabel = '', endLabel = '';
+  LatLon? myLocation;
   List<RouteData> routes = const [];
   int selected = 0;
   bool busy = false;
@@ -27,60 +29,58 @@ class AppState extends ChangeNotifier {
   String status = '';
   String? error;
   String? note;
-  double distanceKm = 0;
   NavController? nav;
   int _gen = 0;
 
+  bool get hasDestination => end != null;
   RouteData? get route => routes.isEmpty ? null : routes[selected.clamp(0, routes.length - 1)];
+  String get startTitle => start == null ? 'Моё местоположение' : startLabel;
 
-  Future<void> load() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      final raw = sp.getString(_prefsKey);
-      if (raw != null) prefs = RoutePrefs.fromJson((jsonDecode(raw) as Map).cast<String, Object?>());
-    } catch (_) {}
-    notifyListeners();
+  static String _coords(LatLon p) => '${p.lat.toStringAsFixed(5)}, ${p.lon.toStringAsFixed(5)}';
+
+  /// Задаёт пункт назначения и сразу строит маршрут.
+  Future<void> setDestination(LatLon pos, {String? label}) {
+    end = pos;
+    endLabel = label ?? _coords(pos);
+    _leaveDemoIfFar();
+    return plan();
   }
 
-  Future<void> savePrefs() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(_prefsKey, jsonEncode(prefs.toJson()));
-    } catch (_) {}
+  /// Задаёт точку отправления (null — снова «Моё местоположение») и перестраивает маршрут.
+  Future<void> setStart(LatLon? pos, {String? label}) async {
+    start = pos;
+    startLabel = pos == null ? '' : (label ?? _coords(pos));
+    _leaveDemoIfFar();
+    if (end != null) await plan();
   }
 
-  /// Применяет изменение настроек, сохраняет и уведомляет слушателей.
-  void updatePrefs(void Function(RoutePrefs p) change) {
-    change(prefs);
-    savePrefs();
-    notifyListeners();
-  }
-
-  void setPoint({required bool isStart, required LatLon pos, String? label}) {
-    final text = label ?? '${pos.lat.toStringAsFixed(5)}, ${pos.lon.toStringAsFixed(5)}';
-    if (isStart) {
-      start = pos;
-      startLabel = text;
-    } else {
-      end = pos;
-      endLabel = text;
-    }
-    clearRoutes();
-  }
-
-  void swap() {
-    final s = start, sl = startLabel;
-    start = end;
+  Future<void> swap() async {
+    final e = end;
+    if (e == null) return;
+    final s = start ?? myLocation;
+    final sl = start == null ? 'Моё местоположение' : startLabel;
+    start = e;
     startLabel = endLabel;
     end = s;
-    endLabel = sl;
-    clearRoutes();
+    endLabel = s == null ? '' : sl;
+    if (end != null) {
+      await plan();
+    } else {
+      notifyListeners();
+    }
   }
 
-  void clearRoutes() {
+  /// Сброс к пустой карте.
+  void clear() {
+    _gen++;
+    if (busy) cancel?.call();
+    start = null;
+    end = null;
+    startLabel = endLabel = '';
     routes = const [];
-    error = null;
-    note = null;
+    busy = false;
+    demo = false;
+    error = note = null;
     status = '';
     notifyListeners();
   }
@@ -90,34 +90,46 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void startDemo() {
+  Future<void> startDemo() {
     demo = true;
     start = demoStart;
-    end = demoEnd;
     startLabel = 'Город А (демо)';
+    end = demoEnd;
     endLabel = 'Город Б (демо)';
-    notifyListeners();
+    return plan();
   }
 
-  void leaveDemoIfFar() {
-    if (demo && start != null && haversine(start!.lat, start!.lon, demoStart.lat, demoStart.lon) > 5000) demo = false;
+  void _leaveDemoIfFar() {
+    final e = end;
+    if (demo && e != null && haversine(e.lat, e.lon, demoEnd.lat, demoEnd.lon) > 50000) demo = false;
   }
 
   Future<void> plan() async {
-    final s = start, e = end;
-    if (s == null || e == null) {
-      error = 'Укажите точки А и Б: найдите адрес или коснитесь карты.';
-      notifyListeners();
-      return;
-    }
-    leaveDemoIfFar();
+    final e = end;
+    if (e == null) return;
     final gen = ++_gen;
     busy = true;
     error = null;
     note = null;
+    routes = const [];
     status = 'Готовлю маршрут…';
     notifyListeners();
-    final out = await _plan(s, e, prefs, demo, (t) {
+    var s = start;
+    if (s == null) {
+      status = 'Определяю местоположение…';
+      notifyListeners();
+      s = await locate?.call();
+      if (gen != _gen) return;
+      if (s == null) {
+        busy = false;
+        status = '';
+        error = 'Не удалось определить местоположение. Укажите точку отправления: нажмите на верхнюю строку.';
+        notifyListeners();
+        return;
+      }
+      myLocation = s;
+    }
+    final out = await _plan(s, e, demo, (t) {
       if (gen == _gen) {
         status = t;
         notifyListeners();
@@ -133,7 +145,6 @@ class AppState extends ChangeNotifier {
       routes = out.routes!;
       selected = 0;
       note = out.note;
-      distanceKm = out.distanceKm;
     }
     notifyListeners();
   }
@@ -174,8 +185,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _reroute(LatLon pos) async {
     final wasSim = nav?.simulate ?? false;
-    final e = end;
-    if (e == null) return;
+    if (end == null) return;
     start = pos;
     startLabel = 'Моё местоположение';
     await _disposeNav();

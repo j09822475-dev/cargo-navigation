@@ -2,34 +2,28 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'core/geo.dart';
-import 'core/prefs.dart';
-import 'core/tariffs.dart';
-import 'engine/demo_source.dart';
 import 'engine/engine.dart';
-import 'engine/overpass_source.dart';
 import 'engine/routing_service.dart';
 import 'engine/tariff_assets.dart';
 import 'ui/app_state.dart';
 import 'ui/home_page.dart';
+import 'ui/locator.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final tariffFiles = await loadTariffFiles();
+  final assets = await loadEngineAssets();
   PlanFn plan;
   VoidCallback? cancel;
   if (kIsWeb) {
     // Изоляты недоступны в вебе (используется только для предпросмотра) — считаем в основном потоке.
-    final book = TariffBook.parse(tariffFiles);
-    final real = RoutingEngine(OverpassSource(), tariffs: book), demo = RoutingEngine(DemoSource(), tariffs: book);
-    plan = (LatLon s, LatLon e, RoutePrefs p, bool d, Progress? pr) => (d ? demo : real).plan(s, e, p, onProgress: pr);
+    final (real, demo) = buildEngines(assets);
+    plan = (LatLon s, LatLon e, bool d, Progress? pr) => (d ? demo : real).plan(s, e, onProgress: pr);
   } else {
-    final service = await RoutingService.start(tariffFiles: tariffFiles);
+    final service = await RoutingService.start(assets);
     plan = service.plan;
     cancel = service.cancelAll;
   }
-  final state = AppState(plan, cancel: cancel);
-  await state.load();
-  runApp(CargoApp(state: state));
+  runApp(CargoApp(state: AppState(plan, cancel: cancel, locate: deviceLocation)));
 }
 
 class CargoApp extends StatelessWidget {

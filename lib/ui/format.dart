@@ -28,3 +28,15 @@ String fmtMoney(double v) {
   final whole = cents ~/ 100, frac = cents % 100;
   return '${_group(whole)},${frac.toString().padLeft(2, '0')}\u00A0€';
 }
+
+/// Время прибытия «14:32» через [hours] часов от [now].
+String fmtEta(double hours, DateTime now) {
+  final t = now.add(Duration(minutes: (hours * 60).round()));
+  final hm = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  final days = DateTime(t.year, t.month, t.day).difference(DateTime(now.year, now.month, now.day)).inDays;
+  return days == 0 ? hm : '$hm (+$days дн.)';
+}
+
+const countryNamesRu = <String, String>{
+  'AT': 'Австрия', 'CZ': 'Чехия', 'SK': 'Словакия', 'SI': 'Словения', 'HU': 'Венгрия', 'RO': 'Румыния', 'BG': 'Болгария',
+};

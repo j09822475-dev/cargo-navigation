@@ -20,17 +20,34 @@ class Step {
 
 /// Готовый к отображению и навигации маршрут: не зависит от графа (можно передавать между изолятами).
 class RouteData {
-  final Set<String> tags;
-  final double hours, meters, tollCost, tollMeters, tollKnownMeters;
+  final Set<String> tags; // best, fastest, free
+  /// Время в пути с учётом погоды, часы.
+  final double hours;
+
+  /// Сколько из этого добавила погода, часы.
+  final double weatherDelayHours;
+  final double meters;
+  final double distanceToll, tollMeters, tollOperatorMeters, tollUnknownMeters;
+  final List<VignetteCharge> vignettes;
+
+  /// Предупреждения по маршруту (погода и т. п.).
+  final List<String> warnings;
   final Float64List pts; // lat, lon, lat, lon…
   final Int32List edgeStartPt; // для ребра k — индекс точки начала; длина = рёбер + 1
   final Int32List edgeSpeed; // лимит по рёбрам
-  final Uint8List edgeToll; // 1 — платное
+  final Uint8List edgeToll; // 1 — плата за км, 2 — дорога с виньеткой, 3 — платный объект без цены
   final List<Step> steps;
-  const RouteData(this.tags, this.hours, this.meters, this.tollCost, this.tollMeters, this.tollKnownMeters,
-      this.pts, this.edgeStartPt, this.edgeSpeed, this.edgeToll, this.steps);
+  const RouteData(this.tags, this.hours, this.weatherDelayHours, this.meters, this.distanceToll, this.tollMeters,
+      this.tollOperatorMeters, this.tollUnknownMeters, this.vignettes, this.warnings, this.pts, this.edgeStartPt,
+      this.edgeSpeed, this.edgeToll, this.steps);
 
-  double get money => tollCost;
+  double get vignetteCost => vignettes.fold(0.0, (s, v) => s + v.priceEur);
+
+  /// Стоимость дороги: платные участки и виньетки, €.
+  double get money => distanceToll + vignetteCost;
+
+  /// Есть ли в цене оценочные (неподтверждённые) составляющие.
+  bool get estimated => tollMeters - tollOperatorMeters > 1 || vignettes.any((v) => !v.confirmed) || tollUnknownMeters > 1;
   int get pointCount => pts.length ~/ 2;
   int get edgeCount => edgeSpeed.length;
 }
@@ -64,7 +81,9 @@ String _roadName(RoadGraph g, int e) {
   return classLabels[g.cls[e]].toLowerCase();
 }
 
-RouteData buildRouteData(RoadGraph g, RouteResult r) {
+RouteData buildRouteData(SearchContext ctx, RouteResult r,
+    {double? hours, List<String> warnings = const [], Set<String>? tags}) {
+  final g = ctx.g;
   final edges = r.edges;
   final pts = <double>[];
   final edgeStart = Int32List(edges.length + 1);
@@ -77,7 +96,8 @@ RouteData buildRouteData(RoadGraph g, RouteResult r) {
       pts..add(g.ptLat[i])..add(g.ptLon[i]);
     }
     speeds[k] = g.speed[e];
-    tolls[k] = g.toll[e];
+    final kind = ctx.tollKind[e];
+    tolls[k] = kind == 3 ? 3 : (kind != 0 ? 1 : (ctx.vig[e] != 0 ? 2 : 0));
   }
   edgeStart[edges.length] = pts.length ~/ 2 - 1;
 
@@ -119,19 +139,20 @@ RouteData buildRouteData(RoadGraph g, RouteResult r) {
         text = 'Начните движение по $label';
       }
       final a = g.ptStart[e];
-      cur = Step(type, text, label, 0, g.toll[e] == 1, g.speed[e], g.ptLat[a], g.ptLon[a], k);
+      cur = Step(type, text, label, 0, tolls[k] == 1, g.speed[e], g.ptLat[a], g.ptLon[a], k);
       curLabel = label;
       curMeters = 0;
-      curToll = g.toll[e] == 1;
+      curToll = tolls[k] == 1;
     }
     curMeters += g.len[e];
-    if (g.toll[e] == 1) curToll = true;
+    if (tolls[k] == 1) curToll = true;
     prev = e;
   }
   flush();
   final lastLat = pts.isEmpty ? 0.0 : pts[pts.length - 2], lastLon = pts.isEmpty ? 0.0 : pts[pts.length - 1];
   steps.add(Step(TurnType.arrive, 'Вы прибыли в пункт назначения', '', 0, false, 0, lastLat, lastLon, edges.length));
 
-  return RouteData(Set.of(r.tags), r.hours, r.meters, r.tollCost, r.tollMeters, r.tollKnownMeters,
-      Float64List.fromList(pts), edgeStart, speeds, tolls, steps);
+  return RouteData(Set.of(tags ?? r.tags), hours ?? r.hours, (hours ?? r.hours) - r.hours, r.meters, r.distanceToll,
+      r.tollMeters, r.tollOperatorMeters, r.tollUnknownMeters, r.vignettes, warnings, Float64List.fromList(pts),
+      edgeStart, speeds, tolls, steps);
 }

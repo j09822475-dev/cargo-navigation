@@ -1,19 +1,31 @@
 import 'dart:async';
 import 'dart:isolate';
 
+import '../core/countries.dart';
 import '../core/geo.dart';
-import '../core/prefs.dart';
-import '../core/tariffs.dart';
+import '../core/toll_model.dart';
 import 'demo_source.dart';
 import 'engine.dart';
+import 'open_meteo.dart';
 import 'overpass_source.dart';
 import 'road_source.dart';
+import 'tariff_assets.dart';
 
 /// Функция построения маршрута (в приложении — через фоновый изолят, в тестах — напрямую).
-typedef PlanFn = Future<PlanOutcome> Function(LatLon start, LatLon end, RoutePrefs prefs, bool demo, Progress? onProgress);
+typedef PlanFn = Future<PlanOutcome> Function(LatLon start, LatLon end, bool demo, Progress? onProgress);
+
+/// Движки для настоящих и демо-данных на общих встроенных данных.
+(RoutingEngine real, RoutingEngine demo) buildEngines(EngineAssets a) {
+  final countries = CountryIndex.parse(a.countriesGeo);
+  final tolls = TollModel.parse(a.countryTolls, a.operatorFiles);
+  return (
+    RoutingEngine(OverpassSource(), countries: countries, tolls: tolls, weather: OpenMeteoSource()),
+    RoutingEngine(DemoSource(), countries: countries, tolls: tolls),
+  );
+}
 
 /// Фоновый изолят: загрузка данных, разбор JSON, построение графа и поиск не блокируют интерфейс.
-/// Граф остаётся в изоляте между запросами — смена настроек и перестроение не качают данные заново.
+/// Граф остаётся в изоляте между запросами — перестроение маршрута не качает данные заново.
 class RoutingService {
   final SendPort _toWorker;
   final ReceivePort _fromWorker;
@@ -38,8 +50,7 @@ class RoutingService {
     });
   }
 
-  /// [tariffFiles] — тексты JSON с тарифами операторов (assets/tariffs).
-  static Future<RoutingService> start({List<String> tariffFiles = const []}) async {
+  static Future<RoutingService> start(EngineAssets assets) async {
     final recv = ReceivePort();
     await Isolate.spawn(_workerMain, recv.sendPort);
     final events = StreamController<dynamic>();
@@ -48,16 +59,16 @@ class RoutingService {
     await sub.cancel();
     final back = ReceivePort();
     first.send(back.sendPort);
-    first.send(['tariffs', 0, tariffFiles]);
+    first.send(['assets', 0, assets.countriesGeo, assets.countryTolls, assets.operatorFiles]);
     return RoutingService._(first, back);
   }
 
-  Future<PlanOutcome> plan(LatLon start, LatLon end, RoutePrefs prefs, bool demo, Progress? onProgress) {
+  Future<PlanOutcome> plan(LatLon start, LatLon end, bool demo, Progress? onProgress) {
     final id = _nextId++;
     final c = Completer<PlanOutcome>();
     _pending[id] = c;
     _progress[id] = onProgress;
-    _toWorker.send(['plan', id, start.lat, start.lon, end.lat, end.lon, prefs.toJson(), demo]);
+    _toWorker.send(['plan', id, start.lat, start.lon, end.lat, end.lon, demo]);
     return c.future;
   }
 
@@ -72,8 +83,7 @@ void _workerMain(SendPort main) {
   final port = ReceivePort();
   main.send(port.sendPort);
   SendPort? out;
-  final real = RoutingEngine(OverpassSource());
-  final demo = RoutingEngine(DemoSource());
+  RoutingEngine? real, demo;
   final tokens = <int, CancelToken>{};
   port.listen((m) async {
     final msg = m as dynamic;
@@ -83,10 +93,9 @@ void _workerMain(SendPort main) {
     }
     final list = msg as List;
     final id = list[1] as int;
-    if (list[0] == 'tariffs') {
-      final book = TariffBook.parse((list[2] as List).cast<String>());
-      real.tariffs = book;
-      demo.tariffs = book;
+    if (list[0] == 'assets') {
+      (real, demo) = buildEngines(
+          EngineAssets(list[2] as String, list[3] as String, (list[4] as List).cast<String>()));
       return;
     }
     if (list[0] == 'cancel') {
@@ -99,11 +108,11 @@ void _workerMain(SendPort main) {
     }
     final token = tokens[id] = CancelToken();
     try {
-      final engine = (list[7] as bool) ? demo : real;
+      final engine = (list[6] as bool) ? demo : real;
+      if (engine == null) throw StateError('движок ещё не готов');
       final outcome = await engine.plan(
         LatLon(list[2] as double, list[3] as double),
         LatLon(list[4] as double, list[5] as double),
-        RoutePrefs.fromJson((list[6] as Map).cast<String, Object?>()),
         onProgress: (t) => out?.send(['progress', id, t]),
         cancel: token,
       );

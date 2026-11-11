@@ -31,6 +31,9 @@ class NavController extends ChangeNotifier {
   bool _stopped = false;
 
   LatLon? position;
+
+  /// Направление движения по маршруту, градусы от севера.
+  double heading = 0;
   double remaining = 0;
   double toNext = 0;
   Step? next;
@@ -159,6 +162,7 @@ class NavController extends ChangeNotifier {
     }
     _offCount = 0;
     _lastIdx = bestI;
+    heading = bearing(route.pts[2 * bestI - 2], route.pts[2 * bestI - 1], route.pts[2 * bestI], route.pts[2 * bestI + 1]);
     final k = _edgeAt[bestI];
     limit = route.edgeSpeed[k];
     remaining = math.max(0, total - done);

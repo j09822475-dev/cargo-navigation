@@ -2,224 +2,210 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:cargo_navigation/core/geo.dart';
-import 'package:cargo_navigation/core/prefs.dart';
-import 'package:cargo_navigation/core/road_graph.dart';
+import 'package:cargo_navigation/core/weather.dart';
 import 'package:cargo_navigation/engine/demo_source.dart';
 import 'package:cargo_navigation/engine/engine.dart';
+import 'package:cargo_navigation/engine/open_meteo.dart';
 import 'package:cargo_navigation/engine/overpass_source.dart';
 import 'package:cargo_navigation/engine/road_source.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-class Call {
-  final String kind;
-  final Set<int> classes;
-  final double radius, lengthMeters;
-  Call(this.kind, this.classes, this.radius, this.lengthMeters);
-}
+import 'helpers.dart';
 
-/// Имитация Overpass на синтетической сети: фильтрует пути по классу и по области/коридору.
-class FakeSource implements RoadSource {
-  final List<WaySpec> specs;
-  final List<Call> calls = [];
-  FakeSource(this.specs);
-
-  bool _cls(WaySpec s, Set<int> classes) {
-    final hw = s.tags['highway']!.replaceAll('_link', '');
-    return classes.contains(roadClasses.indexOf(hw));
-  }
-
-  @override
-  Future<WayData> fetchBox(Bbox b, Set<int> classes, CancelToken cancel) async {
-    calls.add(Call('box', classes, 0, 0));
-    return waysFromSpecs([
-      for (final s in specs)
-        if (_cls(s, classes) && s.nodes.any((n) => n.$2 >= b.south && n.$2 <= b.north && n.$3 >= b.west && n.$3 <= b.east)) s
-    ]);
-  }
-
-  static double _distToSegment(LatLon p, LatLon a, LatLon b) {
-    final kx = math.cos(p.lat * math.pi / 180);
-    final dx = (b.lon - a.lon) * kx, dy = b.lat - a.lat;
-    final px = (p.lon - a.lon) * kx, py = p.lat - a.lat;
-    final l2 = dx * dx + dy * dy;
-    final t = l2 == 0 ? 0.0 : ((px * dx + py * dy) / l2).clamp(0.0, 1.0);
-    return haversine(p.lat, p.lon, a.lat + dy * t, a.lon + (b.lon - a.lon) * t);
-  }
-
-  @override
-  Future<WayData> fetchCorridor(List<LatLon> line, double r, Set<int> classes, CancelToken cancel) async {
-    var len = 0.0;
-    for (var i = 1; i < line.length; i++) {
-      len += haversine(line[i - 1].lat, line[i - 1].lon, line[i].lat, line[i].lon);
-    }
-    calls.add(Call('corridor', classes, r, len));
-    bool near(double la, double lo) {
-      for (var i = 1; i < line.length; i++) {
-        if (_distToSegment(LatLon(la, lo), line[i - 1], line[i]) <= r) return true;
-      }
-      return false;
-    }
-
-    return waysFromSpecs([
-      for (final s in specs)
-        if (_cls(s, classes) && s.nodes.any((n) => near(n.$2, n.$3))) s
-    ]);
-  }
-}
-
-/// ~1470 км с запада на восток: платная магистраль и параллельная бесплатная главная дорога.
-List<WaySpec> longNetwork({double motorwayLat = 55.75, double primaryLat = 55.95}) {
-  const n = 48; // шаг 0.5° ≈ 31 км
+/// ~1730 км с запада на восток по 48,5° с. ш.: Бретань → Германия → Австрия → Словакия.
+/// Магистраль (во Франции с тегом toll=yes) и параллельная бесплатная главная дорога.
+List<WaySpec> longNetwork() {
+  const n = 48; // шаг 0,5° ≈ 37 км
+  const lat = 48.5;
   final specs = <WaySpec>[];
-  final motor = [for (var i = 0; i < n; i++) (1000 + i, motorwayLat, 37.6 + 0.5 * i)];
-  final prim = [for (var i = 0; i < n; i++) (2000 + i, primaryLat, 37.6 + 0.5 * i)];
-  specs.add(WaySpec(1, {'highway': 'motorway', 'toll': 'yes', 'maxspeed': '110', 'name': 'Платная М'}, motor));
-  specs.add(WaySpec(2, {'highway': 'primary', 'maxspeed': '70', 'name': 'Главное шоссе'}, prim));
+  final motor = [for (var i = 0; i < n; i++) (1000 + i, lat, -4.0 + 0.5 * i)];
+  final prim = [for (var i = 0; i < n; i++) (2000 + i, lat + 0.15, -4.0 + 0.5 * i)];
+  // запад (Франция) — платный, дальше без тега
+  specs.add(WaySpec(1, {'highway': 'motorway', 'toll': 'yes', 'maxspeed': '130', 'name': 'М запад'}, motor.sublist(0, 23)));
+  specs.add(WaySpec(3, {'highway': 'motorway', 'maxspeed': '130', 'name': 'М восток'}, motor.sublist(22)));
+  specs.add(WaySpec(2, {'highway': 'primary', 'maxspeed': '80', 'name': 'Главное шоссе'}, prim));
   for (var i = 0; i < n; i += 6) {
     specs.add(WaySpec(100 + i, {'highway': 'secondary', 'maxspeed': '60', 'name': 'Связка $i'}, [motor[i], prim[i]]));
   }
-  // подъезды у концов
-  specs.add(WaySpec(5, {'highway': 'residential', 'name': 'ул. Старта'}, [(1, motorwayLat + 0.004, 37.6 - 0.004), motor.first]));
-  specs.add(WaySpec(6, {'highway': 'residential', 'name': 'ул. Финиша'}, [motor.last, (2, motorwayLat + 0.004, 37.6 + 0.5 * (n - 1) + 0.004)]));
-  // мелкая дорога вдоль трассы — должна подтянуться только при уточнении
-  specs.add(WaySpec(7, {'highway': 'tertiary', 'maxspeed': '60', 'name': 'Местная'}, [for (var i = 0; i < n; i++) (3000 + i, motorwayLat - 0.02, 37.6 + 0.5 * i)]));
+  specs.add(WaySpec(99, {'highway': 'secondary', 'maxspeed': '60', 'name': 'Связка у финиша'}, [motor.last, prim.last]));
+  specs.add(WaySpec(5, {'highway': 'residential', 'name': 'ул. Старта'}, [(1, lat + 0.004, -4.004), motor.first]));
+  specs.add(WaySpec(6, {'highway': 'residential', 'name': 'ул. Финиша'}, [motor.last, (2, lat + 0.004, 19.504)]));
   return specs;
 }
 
-const longStart = LatLon(55.754, 37.596);
-const longEnd = LatLon(55.754, 61.104);
+const longStart = LatLon(48.504, -4.004);
+const longEnd = LatLon(48.504, 19.504);
+
+RoutingEngine engineOf(RoadSource src, {WeatherSource? weather}) =>
+    RoutingEngine(src, countries: countries, tolls: tolls, weather: weather);
 
 void main() {
   test('Overpass: запросы и разбор ответа', () {
     final q = corridorQuery([const LatLon(1, 2), const LatLon(3, 4.5)], 30000, {0, 1});
     expect(q, contains('around:30000,1.00000,2.00000,3.00000,4.50000'));
     expect(q, contains('motorway|motorway_link|trunk|trunk_link'));
-    expect(q, contains('out body geom'));
-    final b = boxQuery(const Bbox(1, 2, 3, 4), {2});
-    expect(b, contains('(1.0,2.0,3.0,4.0)'));
-
     final data = parseOverpass(jsonEncode({
       'elements': [
         {
           'type': 'way', 'id': 10, 'nodes': [1, 2],
           'geometry': [{'lat': 1.0, 'lon': 2.0}, {'lat': 1.0, 'lon': 2.1}],
-          'tags': {'highway': 'primary', 'maxspeed': '90', 'toll': 'yes', 'name': 'Т'}
+          'tags': {'highway': 'primary', 'maxspeed': '90', 'toll': 'yes', 'name': 'Т', 'operator': 'APRR'}
         },
         {'type': 'way', 'id': 11, 'nodes': [3, 4], 'geometry': [{'lat': 1.0, 'lon': 2.0}, null], 'tags': {'highway': 'primary'}},
         {'type': 'way', 'id': 12, 'nodes': [5, 6], 'geometry': [{'lat': 1.0, 'lon': 2.0}, {'lat': 1.0, 'lon': 2.1}], 'tags': {'highway': 'footway'}},
-        {'type': 'node', 'id': 1, 'lat': 1.0, 'lon': 2.0},
       ]
     }));
     expect(data.wayCount, 1);
     expect(data.infos.first.toll, isTrue);
-    expect(data.infos.first.fwd, 90);
+    expect(data.infos.first.operator, 'APRR');
     expect(() => parseOverpass(jsonEncode({'elements': [], 'remark': 'runtime error: Query timed out'})), throwsA(isA<OverpassException>()));
   });
 
-  test('chunkLine делит ломаную на куски не длиннее лимита', () {
-    final line = greatCirclePoints(longStart, longEnd, 30000);
-    final chunks = RoutingEngine.chunkLine(line, 150000);
-    expect(chunks.length, greaterThan(8));
-    for (final c in chunks) {
-      var len = 0.0;
-      for (var i = 1; i < c.length; i++) {
-        len += haversine(c[i - 1].lat, c[i - 1].lon, c[i].lat, c[i].lon);
-      }
-      expect(len, lessThanOrEqualTo(150000 + 1));
-    }
-    expect(chunks.first.first, line.first);
-    expect(chunks.last.last, line.last);
-  });
-
-  test('маршрут ~1470 км (> 600 км) строится через коридоры', () async {
+  test('маршрут ~1730 км через четыре страны: коридоры, плата за км и виньетки', () async {
     final src = FakeSource(longNetwork());
-    final engine = RoutingEngine(src);
     final progress = <String>[];
-    final out = await engine.plan(longStart, longEnd, RoutePrefs(priority: Priority.fastest), onProgress: progress.add);
+    final out = await engineOf(src).plan(longStart, longEnd, onProgress: progress.add);
     expect(out.error, isNull);
-    expect(out.distanceKm, greaterThan(1400));
     final best = out.routes!.first;
-    expect(best.meters / 1000, inInclusiveRange(1450, 1560));
-    expect(best.tollCost, greaterThan(0)); // дорогое время — платная магистраль
+    expect(best.meters / 1000, inInclusiveRange(1700, 1800));
+    expect(best.distanceToll, greaterThan(50), reason: 'платная магистраль во Франции');
+    expect(best.vignettes.map((v) => v.iso).toSet(), {'AT', 'SK'});
+    expect(best.money, closeTo(best.distanceToll + 9.60 + 8.10, 1e-6));
+    expect(best.estimated, isTrue, reason: 'ставка Франции без оператора — оценка');
     expect(out.note, contains('Дальний маршрут'));
 
     final corridors = src.calls.where((c) => c.kind == 'corridor').toList();
-    expect(corridors.length, greaterThan(10), reason: 'данные грузятся кусками, а не одной рамкой');
-    expect(src.calls.where((c) => c.kind == 'box').every((c) => c.lengthMeters == 0), isTrue);
+    expect(corridors.length, greaterThan(10), reason: 'данные грузятся кусками');
     for (final c in corridors) {
       expect(c.lengthMeters, lessThanOrEqualTo(160000));
     }
-    // сначала каркас: только магистрали/шоссе
-    expect(corridors.first.classes.difference({0, 1}), isEmpty);
-    // потом уточнение вдоль трассы узким коридором
-    expect(corridors.any((c) => c.radius == 3000), isTrue);
+    expect(corridors.first.classes.difference({0, 1}), isEmpty, reason: 'сначала каркас из магистралей');
+    expect(corridors.any((c) => c.radius == 3000), isTrue, reason: 'затем уточнение вдоль трассы');
     expect(progress.any((m) => m.contains('участок')), isTrue);
+    // бесплатная альтернатива по главному шоссе
+    expect(out.routes!.any((r) => r.tags.contains('free')), isTrue);
   });
 
-  test('дальний маршрут: «только бесплатные» расширяет каркас до главных дорог', () async {
+  test('повтор того же запроса не перезагружает данные', () async {
     final src = FakeSource(longNetwork());
-    final engine = RoutingEngine(src);
-    final out = await engine.plan(longStart, longEnd, RoutePrefs(priority: Priority.fastest, tollMode: TollMode.free));
-    expect(out.error, isNull, reason: out.error);
-    expect(out.routes!.first.tollCost, 0);
-    expect(src.calls.any((c) => c.kind == 'corridor' && c.classes.contains(2)), isTrue);
-  });
-
-  test('дальний маршрут: смена настроек не перезагружает данные', () async {
-    final src = FakeSource(longNetwork());
-    final engine = RoutingEngine(src);
-    await engine.plan(longStart, longEnd, RoutePrefs(priority: Priority.fastest));
+    final engine = engineOf(src);
+    await engine.plan(longStart, longEnd);
     final n = src.calls.length;
-    final out = await engine.plan(longStart, longEnd, RoutePrefs(priority: Priority.cheapest));
+    final out = await engine.plan(longStart, longEnd);
     expect(out.routes, isNotNull);
     expect(src.calls.length, n);
   });
 
-  test('каркас расширяется, если дороги далеко от прямой линии', () async {
-    // Дорога прогибается к югу на ~128 км от большого круга и состоит из коротких путей:
-    // коридор начального радиуса (70 км) её не захватывает, нужно расширение до 140 км.
-    const n = 48;
-    final nodes = [
-      for (var i = 0; i < n; i++) (1000 + i, 55.75 - 0.7 * math.sin(math.pi * i / (n - 1)), 37.6 + 0.5 * i)
-    ];
+  test('маршрут из Германии в Италию идёт в обход Швейцарии', () async {
+    // прямая магистраль через Швейцарию и объезд через Австрию (Форарльберг — Решен — Больцано)
+    const start = LatLon(47.9, 9.0), end = LatLon(45.6, 9.0);
     final specs = <WaySpec>[
-      for (var i = 0; i < n - 1; i += 2)
-        WaySpec(10 + i, {'highway': 'trunk', 'maxspeed': '90', 'name': 'Трасса'}, nodes.sublist(i, math.min(i + 3, n))),
-      WaySpec(5, {'highway': 'residential', 'name': 'ул. Старта'}, [(1, 55.754, 37.596), nodes.first]),
-      WaySpec(6, {'highway': 'residential', 'name': 'ул. Финиша'}, [nodes.last, (2, 55.754, 61.104)]),
+      const WaySpec(1, {'highway': 'motorway', 'maxspeed': '120', 'name': 'Через Швейцарию'},
+          [(10, 47.9, 9.0), (11, 47.3, 9.0), (12, 46.8, 9.0), (13, 46.2, 9.0), (20, 45.6, 9.0)]),
     ];
+    const detour = [
+      (10, 47.9, 9.0), (31, 47.55, 9.75), (32, 47.15, 10.6), (33, 46.85, 10.5), (34, 46.65, 10.65),
+      (35, 46.5, 11.35), (36, 45.9, 11.0), (37, 45.6, 10.0), (20, 45.6, 9.0),
+    ];
+    for (var i = 1; i < detour.length; i++) {
+      // отдельные пути, чтобы у каждого участка была своя страна; параллельная мелкая дорога делает узлы перекрёстками
+      specs.add(WaySpec(100 + i, {'highway': 'trunk', 'maxspeed': '90', 'name': 'Объезд по ЕС'}, [detour[i - 1], detour[i]]));
+    }
     final src = FakeSource(specs);
-    final out = await RoutingEngine(src).plan(longStart, longEnd, RoutePrefs());
+    final engine = engineOf(src);
+    // опорная линия обходит Швейцарию
+    final line = engine.spine(start, end);
+    expect(line.any((p) => countries.isDeepNonEu(p.lat, p.lon)), isFalse);
+    expect(line.length, greaterThan(greatCirclePoints(start, end, 30000).length));
+
+    final out = await engine.plan(start, end);
     expect(out.error, isNull, reason: out.error);
-    final radii = src.calls.where((c) => c.kind == 'corridor').map((c) => c.radius).toSet();
-    expect(radii, contains(140000.0), reason: 'должен был потребоваться коридор шире начального');
-    expect(radii.first, lessThan(100000));
-    expect(out.routes!.first.meters / 1000, inInclusiveRange(1450, 1700));
+    final r = out.routes!.first;
+    for (var i = 0; i < r.pointCount; i++) {
+      expect(countries.isDeepNonEu(r.pts[2 * i], r.pts[2 * i + 1]), isFalse);
+    }
+    expect(r.meters / 1000, greaterThan(400), reason: 'объезд длиннее прямой (255 км)');
+    expect(r.steps.any((s) => s.text.contains('Через Швейцарию')), isFalse);
+    expect(r.vignettes.map((v) => v.iso), contains('AT'));
   });
 
-  test('нет дорог нужных типов — понятное сообщение', () async {
-    final engine = RoutingEngine(FakeSource(longNetwork()));
-    final out = await engine.plan(longStart, longEnd, RoutePrefs(classes: {6, 7}));
-    expect(out.routes, isNull);
-    expect(out.error, contains('включите'));
+  test('точки вне ЕС и вне Европы отклоняются с понятным сообщением', () async {
+    final engine = engineOf(FakeSource(longNetwork()));
+    final ch = await engine.plan(const LatLon(46.95, 7.45), longEnd); // Берн
+    expect(ch.routes, isNull);
+    expect(ch.error, allOf(contains('Евросоюз'), contains('CH')));
+    final rs = await engine.plan(longStart, const LatLon(44.8, 20.45)); // Белград
+    expect(rs.error, contains('Точка назначения'));
+    final far = await engine.plan(longStart, const LatLon(40.7, -74.0)); // Нью-Йорк
+    expect(far.error, contains('вне Европы'));
   });
 
-  test('слишком большое расстояние отклоняется', () async {
-    final engine = RoutingEngine(FakeSource(longNetwork()));
-    final out = await engine.plan(const LatLon(0, 0), const LatLon(0, 80), RoutePrefs());
-    expect(out.error, contains('Максимум'));
+  test('погода: снег замедляет маршрут и даёт предупреждение', () async {
+    final clear = await engineOf(DemoSource()).plan(demoStart, demoEnd);
+    final w = FakeWeather((_) => const WeatherPoint(code: 73, snowfall: 0.5, temperature: -2));
+    final snowy = await engineOf(DemoSource(), weather: w).plan(demoStart, demoEnd);
+    expect(w.calls, 1);
+    final a = clear.routes!.first, b = snowy.routes!.first;
+    expect(a.weatherDelayHours, 0);
+    expect(b.hours, closeTo(a.hours / 0.7, 0.01));
+    expect(b.weatherDelayHours, greaterThan(0));
+    expect(b.warnings.single, allOf(contains('снег'), contains('мин')));
+  });
+
+  test('погода может поменять основной маршрут', () async {
+    // на магистрали (широта 47,0) гроза и ледяной дождь, на северном шоссе (47,05) ясно
+    final w = FakeWeather((p) => p.lat < 47.03 ? const WeatherPoint(code: 67, precipitation: 9) : const WeatherPoint());
+    final clear = await engineOf(DemoSource()).plan(demoStart, demoEnd);
+    final out = await engineOf(DemoSource(), weather: w).plan(demoStart, demoEnd);
+    expect(clear.routes!.first.money, greaterThan(0), reason: 'в ясную погоду основной — платная магистраль');
+    expect(out.routes!.first.tags, contains('best'));
+    expect(out.routes!.first.money, 0, reason: 'в непогоду на магистрали основной — бесплатное шоссе');
+  });
+
+  test('погода недоступна — маршрут строится без поправки', () async {
+    final out = await engineOf(DemoSource(), weather: _Broken()).plan(demoStart, demoEnd);
+    expect(out.routes, isNotNull);
+    expect(out.routes!.first.warnings, isEmpty);
+  });
+
+  test('Open-Meteo: запрос и разбор ответа (один объект и массив)', () {
+    final u = OpenMeteoSource.uriFor([const LatLon(48.5, 2.25), const LatLon(47, 3)]);
+    expect(u.host, 'api.open-meteo.com');
+    expect(u.queryParameters['latitude'], '48.500,47.000');
+    expect(u.queryParameters['current'], contains('weather_code'));
+    final one = OpenMeteoSource.parse('{"current":{"temperature_2m":-1.5,"precipitation":0.4,"snowfall":0.3,"weather_code":71,"wind_gusts_10m":35}}')!;
+    expect(one.single.code, 71);
+    expect(one.single.temperature, -1.5);
+    final many = OpenMeteoSource.parse('[{"current":{"weather_code":0}},{"current":{"weather_code":95,"precipitation":12}}]')!;
+    expect(many.length, 2);
+    expect(weatherEffect(many[1]).label, 'гроза');
+    expect(OpenMeteoSource.parse('{"error":true}'), isNull);
+  });
+
+  test('влияние погоды на скорость', () {
+    expect(weatherEffect(const WeatherPoint()).factor, 1);
+    expect(weatherEffect(const WeatherPoint(code: 75, snowfall: 2)).factor, 0.55);
+    expect(weatherEffect(const WeatherPoint(code: 45)).label, 'туман');
+    expect(weatherEffect(const WeatherPoint(gust: 95)).label, 'штормовой ветер');
+    expect(weatherEffect(const WeatherPoint(precipitation: 2)).factor, 0.9);
+    final s = samplePolyline([47.0, 3.0, 47.0, 4.0, 47.0, 5.0], 40000, 8);
+    expect(s.length, 4);
   });
 
   test('отмена прерывает загрузку', () async {
-    final engine = RoutingEngine(FakeSource(longNetwork()));
     final token = CancelToken()..cancelled = true;
-    expect(engine.plan(longStart, longEnd, RoutePrefs(), cancel: token), throwsA(isA<CancelledException>()));
+    expect(engineOf(FakeSource(longNetwork())).plan(longStart, longEnd, cancel: token), throwsA(isA<CancelledException>()));
   });
 
   test('короткий маршрут (демо) строится одной рамкой', () async {
-    final engine = RoutingEngine(DemoSource());
-    final out = await engine.plan(demoStart, demoEnd, RoutePrefs());
+    final out = await engineOf(DemoSource()).plan(demoStart, demoEnd);
     expect(out.routes, isNotNull, reason: out.error);
     expect(out.note, isNull);
+    expect(math.max(0, out.routes!.length), greaterThanOrEqualTo(2));
   });
+}
+
+class _Broken implements WeatherSource {
+  @override
+  Future<List<WeatherPoint>?> current(List<LatLon> points) async => throw Exception('нет сети');
 }

@@ -4,13 +4,16 @@ import 'package:http/http.dart' as http;
 
 import '../core/geo.dart';
 
+/// Страны Евросоюза: поиск адресов ограничен ими.
+const euCountryCodes = 'at,be,bg,hr,cy,cz,dk,ee,fi,fr,de,gr,hu,ie,it,lv,lt,lu,mt,nl,pl,pt,ro,sk,si,es,se';
+
 class Place {
   final String title;
   final LatLon pos;
   const Place(this.title, this.pos);
 }
 
-/// Поиск адресов через Nominatim (OpenStreetMap). Запросы — только по действию пользователя.
+/// Поиск адресов через Nominatim (OpenStreetMap), только в странах ЕС. Запросы — только по действию пользователя.
 class Geocoder {
   final http.Client _client;
   Geocoder([http.Client? client]) : _client = client ?? http.Client();
@@ -23,7 +26,7 @@ class Geocoder {
       return [Place('${p.lat.toStringAsFixed(5)}, ${p.lon.toStringAsFixed(5)}', p)];
     }
     final uri = Uri.https('nominatim.openstreetmap.org', '/search',
-        {'format': 'json', 'limit': '5', 'accept-language': 'ru', 'q': query});
+        {'format': 'json', 'limit': '6', 'accept-language': 'ru', 'countrycodes': euCountryCodes, 'q': query});
     final res = await _client.get(uri, headers: {'User-Agent': 'CargoNavigation/1.0 (Android)'});
     if (res.statusCode != 200) throw Exception('Поиск адреса недоступен (${res.statusCode})');
     final list = jsonDecode(utf8.decode(res.bodyBytes)) as List;

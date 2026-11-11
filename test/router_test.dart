@@ -1,19 +1,26 @@
 import 'package:cargo_navigation/core/geo.dart';
-import 'package:cargo_navigation/core/prefs.dart';
 import 'package:cargo_navigation/core/road_graph.dart';
 import 'package:cargo_navigation/core/route_data.dart';
 import 'package:cargo_navigation/core/router.dart';
 import 'package:cargo_navigation/engine/demo_source.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-RoadGraph demoGraph() => RoadGraph.build([waysFromSpecs(demoSpecs())]);
-
-PlanResult plan(RoadGraph g, RoutePrefs p) => planRoutes(g, demoStart, demoEnd, p);
+import 'helpers.dart';
 
 Set<String> names(RoadGraph g, RouteResult r) => {for (final e in r.edges) g.edgeName(e)};
 
+/// Магистраль и параллельная главная дорога длиной [steps]×0,1° на широте 48,2° начиная с [lon0].
+List<WaySpec> pair(double lon0, int steps, {Map<String, String> motorTags = const {}, double lat = 48.2}) {
+  final motor = [for (var i = 0; i <= steps; i++) (100 + i, lat, lon0 + 0.1 * i)];
+  return [
+    WaySpec(1, {'highway': 'motorway', 'maxspeed': '130', 'name': 'Магистраль', ...motorTags}, motor),
+    WaySpec(2, {'highway': 'primary', 'maxspeed': '80', 'name': 'Главная'},
+        [motor.first, (201, lat + 0.03, lon0 + 0.05 * steps), motor.last]),
+  ];
+}
+
 void main() {
-  final g = demoGraph();
+  final g = graphOf(demoSpecs());
 
   test('parseMaxspeed', () {
     expect(parseMaxspeed('50'), 50);
@@ -24,105 +31,111 @@ void main() {
   });
 
   test('односторонние дороги и разбиение на рёбра', () {
-    final gg = RoadGraph.build([
-      waysFromSpecs([
-        const WaySpec(1, {'highway': 'residential', 'oneway': 'yes'}, [(1, 0, 0), (2, 0, 0.01), (3, 0, 0.02)]),
-      ])
+    final gg = graphOf([
+      const WaySpec(1, {'highway': 'residential', 'oneway': 'yes'}, [(1, 47.0, 3.0), (2, 47.0, 3.01), (3, 47.0, 3.02)]),
     ]);
     expect(gg.edgeCount, 1);
     expect(gg.ptStart[1] - gg.ptStart[0], 3);
+    expect(gg.edgeCountry(0), 'FR');
   });
 
-  test('приоритет «дешевле» — бесплатная дорога', () {
-    final res = plan(g, RoutePrefs(priority: Priority.cheapest));
+  test('Франция: плата за км по тарифу оператора; есть бесплатная альтернатива', () {
+    final res = planRoutes(g, demoStart, demoEnd, tolls);
     expect(res.routes, isNotNull, reason: res.error);
-    expect(res.routes!.first.tollCost, 0);
+    final main = res.routes!.first;
+    expect(main.tags, containsAll(['best', 'fastest']));
+    expect(names(g, main), contains('Платная магистраль (демо)'));
+    // ~60,7 км × 0,112 €/км (тариф APRR)
+    expect(main.distanceToll, closeTo(6.8, 0.2));
+    expect(main.tollOperatorMeters, closeTo(main.tollMeters, 1));
+    expect(main.vignettes, isEmpty);
+    expect(main.money, main.distanceToll);
+    final free = res.routes!.firstWhere((r) => r.tags.contains('free'));
+    expect(free.money, 0);
+    expect(free.hours, greaterThan(main.hours));
+    expect(names(g, free), contains('Шоссе Северное'));
   });
 
-  test('приоритет «быстрее» — платная магистраль', () {
-    final res = plan(g, RoutePrefs(priority: Priority.fastest));
-    expect(res.routes!.first.tollCost, greaterThan(0));
-    expect(names(g, res.routes!.first), contains('Платная магистраль М-Демо'));
+  test('без оператора в таблице — средняя ставка страны', () {
+    final gg = graphOf(pair(3.0, 8, motorTags: {'toll': 'yes'}, lat: 47.0));
+    final r = planRoutes(gg, const LatLon(47.0, 3.0), const LatLon(47.0, 3.8), tolls).routes!.first;
+    expect(r.distanceToll, greaterThan(0));
+    expect(r.tollOperatorMeters, 0);
   });
 
-  test('режим «только бесплатные» не использует платные дороги', () {
-    final res = plan(g, RoutePrefs(priority: Priority.fastest, tollMode: TollMode.free));
-    for (final r in res.routes!) {
-      expect(r.tollCost, 0);
-    }
+  test('Австрия: виньетка — разовая плата, длинный путь идёт по магистрали', () {
+    final gg = graphOf(pair(14.0, 10));
+    final res = planRoutes(gg, const LatLon(48.2, 14.0), const LatLon(48.2, 15.0), tolls);
+    final main = res.routes!.first;
+    expect(names(gg, main), contains('Магистраль'));
+    expect(main.vignettes.map((v) => v.iso), ['AT']);
+    expect(main.money, closeTo(9.60, 1e-9));
+    expect(main.distanceToll, 0);
+    expect(res.routes!.any((r) => r.tags.contains('free') && r.money == 0), isTrue);
   });
 
-  test('режим «предпочитать платные» выбирает магистраль даже при приоритете «дешевле»', () {
-    final res = plan(g, RoutePrefs(priority: Priority.cheapest, tollMode: TollMode.prefer));
-    expect(res.routes!.first.tollCost, greaterThan(0));
+  test('Австрия: ради короткого участка виньетка не покупается — приоритет бесплатной дороги', () {
+    final gg = graphOf(pair(14.0, 2));
+    final main = planRoutes(gg, const LatLon(48.2, 14.0), const LatLon(48.2, 14.2), tolls).routes!.first;
+    expect(names(gg, main), isNot(contains('Магистраль')));
+    expect(main.money, 0);
   });
 
-  test('фильтр по типу дорог', () {
-    final res = plan(g, RoutePrefs(priority: Priority.fastest, classes: {1, 2, 3, 4, 5, 6, 7}));
-    expect(res.routes!.first.tollCost, 0);
-    expect(names(g, res.routes!.first), contains('Шоссе Северное'));
+  test('виньетка одной страны считается один раз, даже если на магистраль въезжают дважды', () {
+    final a = [for (var i = 0; i <= 5; i++) (100 + i, 48.2, 14.0 + 0.1 * i)];
+    final b = [for (var i = 0; i <= 5; i++) (200 + i, 48.2, 14.6 + 0.1 * i)];
+    final gg = graphOf([
+      WaySpec(1, {'highway': 'motorway', 'maxspeed': '130', 'name': 'M1'}, a),
+      WaySpec(2, {'highway': 'primary', 'maxspeed': '80', 'name': 'Связка'}, [a.last, b.first]),
+      WaySpec(3, {'highway': 'motorway', 'maxspeed': '130', 'name': 'M2'}, b),
+    ]);
+    final r = planRoutes(gg, const LatLon(48.2, 14.0), const LatLon(48.2, 15.1), tolls).routes!.first;
+    expect(names(gg, r), containsAll(['M1', 'M2']));
+    expect(r.vignettes.length, 1);
+    expect(r.money, closeTo(9.60, 1e-9));
   });
 
-  test('фильтр по максимальному лимиту скорости', () {
-    final res = plan(g, RoutePrefs(priority: Priority.fastest, maxSpeed: 60));
-    expect(names(g, res.routes!.first), isNot(contains('Платная магистраль М-Демо')));
+  test('Германия: магистрали бесплатны; платный объект без цены помечается', () {
+    final gg = graphOf(pair(10.0, 5, motorTags: {'toll': 'yes'}, lat: 50.0));
+    final r = planRoutes(gg, const LatLon(50.0, 10.0), const LatLon(50.0, 10.5), tolls).routes!.first;
+    expect(r.money, 0);
+    expect(r.tollUnknownMeters, greaterThan(1000));
   });
 
-  test('фильтр по минимальному лимиту скорости', () {
-    final res = plan(g, RoutePrefs(priority: Priority.cheapest, minSpeed: 60));
-    expect(names(g, res.routes!.first), isNot(contains('Южная дорога')));
+  test('дороги в странах вне ЕС отбрасываются', () {
+    // прямая дорога через Швейцарию и объезд по Германии/Австрии… проверяем только отбрасывание
+    final gg = graphOf([
+      const WaySpec(1, {'highway': 'motorway', 'name': 'Через Берн'}, [(1, 46.95, 7.3), (2, 46.95, 7.45), (3, 46.95, 7.6)]),
+      const WaySpec(2, {'highway': 'motorway', 'name': 'Франция'}, [(4, 47.0, 3.0), (5, 47.0, 3.1)]),
+    ]);
+    expect(gg.droppedNonEu, greaterThan(0));
+    expect({for (var e = 0; e < gg.edgeCount; e++) gg.edgeName(e)}, {'Франция'});
+    // узлы отброшенных рёбер не выбираются как ближайшие
+    expect(gg.nearestNodes(46.95, 7.45), isEmpty);
   });
 
-  test('жилые подъезды у старта/финиша доступны при отключённых жилых улицах', () {
-    final res = plan(g, RoutePrefs(classes: {0, 2}));
-    expect(res.routes, isNotNull, reason: res.error);
-  });
-
-  test('топливо и цена времени не влияют на стоимость: затраты = только платные участки', () {
-    final res = plan(g, RoutePrefs(priority: Priority.fastest));
-    for (final r in res.routes!) {
-      expect(r.money, r.tollCost);
-    }
-    // тариф 0.10 €/км на ~50 км магистрали ≈ 5 €
-    final toll = res.routes!.firstWhere((r) => r.tollCost > 0);
-    expect(toll.tollCost, inInclusiveRange(4.5, 5.5));
-  });
-
-  test('приоритет «дешевле»: из равных по стоимости — самый быстрый', () {
-    final res = plan(g, RoutePrefs(priority: Priority.cheapest, tollMode: TollMode.free));
-    final free = res.routes!;
-    expect(free.every((r) => r.tollCost == 0), isTrue);
-    expect(free.first.hours, lessThanOrEqualTo(free.last.hours + 1e-9));
-  });
-
-  test('есть альтернативы: самый быстрый и самый дешёвый', () {
-    final res = plan(g, RoutePrefs(priority: Priority.fastest));
-    final fast = res.routes!.firstWhere((r) => r.tags.contains('fastest'));
-    final cheap = res.routes!.firstWhere((r) => r.tags.contains('cheapest'));
-    expect(fast.hours, lessThan(cheap.hours));
-    expect(cheap.money, lessThanOrEqualTo(fast.money));
+  test('лимит на магистрали без maxspeed берётся по стране', () {
+    final pl = graphOf([const WaySpec(1, {'highway': 'motorway'}, [(1, 52.0, 19.0), (2, 52.0, 19.1)])]);
+    expect(pl.speed[0], 140);
+    final es = graphOf([const WaySpec(1, {'highway': 'motorway'}, [(1, 40.0, -3.5), (2, 40.0, -3.4)])]);
+    expect(es.speed[0], 120);
+    final tagged = graphOf([const WaySpec(1, {'highway': 'motorway', 'maxspeed': '100'}, [(1, 52.0, 19.0), (2, 52.0, 19.1)])]);
+    expect(tagged.speed[0], 100);
   });
 
   test('точка вдали от дорог — понятная ошибка', () {
-    final res = planRoutes(g, const LatLon(10, 10), demoEnd, RoutePrefs());
-    expect(res.error, isNotNull);
+    expect(planRoutes(g, const LatLon(40, 0), demoEnd, tolls).error, isNotNull);
   });
 
-  test('пошаговые инструкции', () {
-    final res = plan(g, RoutePrefs(priority: Priority.fastest));
-    final data = buildRouteData(g, res.routes!.first);
+  test('пошаговые инструкции и данные маршрута', () {
+    final res = planRoutes(g, demoStart, demoEnd, tolls);
+    final data = buildRouteData(res.ctx!, res.routes!.first);
     expect(data.steps.first.text, startsWith('Начните движение'));
     expect(data.steps.last.type, TurnType.arrive);
     expect(data.steps.any((s) => s.toll), isTrue);
     expect(data.edgeStartPt.length, data.edgeCount + 1);
     expect(data.edgeStartPt.last, data.pointCount - 1);
-  });
-
-  test('настройки сериализуются', () {
-    final p = RoutePrefs(priority: Priority.cheapest, tollMode: TollMode.free, classes: {0, 2});
-    final q = RoutePrefs.fromJson(p.toJson());
-    expect(q.priority, Priority.cheapest);
-    expect(q.tollMode, TollMode.free);
-    expect(q.classes, {0, 2});
+    expect(data.edgeToll.contains(1), isTrue);
+    expect(data.estimated, isFalse, reason: 'тариф оператора — не оценка');
   });
 }

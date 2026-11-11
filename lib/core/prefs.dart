@@ -10,86 +10,25 @@ const classLabels = <String>[
 /// Лимит по умолчанию, если в OSM нет maxspeed (км/ч).
 const defaultSpeed = <int>[110, 90, 70, 60, 50, 50, 40, 20];
 
+/// Лимит на автомагистралях по странам, если в OSM нет maxspeed (общие правила стран; DE — рекомендуемые 130).
+const motorwayDefaultByCountry = <String, int>{
+  'AT': 130, 'BE': 120, 'BG': 140, 'HR': 130, 'CY': 100, 'CZ': 130, 'DK': 130, 'EE': 110, 'FI': 120, 'FR': 130,
+  'DE': 130, 'GR': 130, 'HU': 130, 'IE': 120, 'IT': 130, 'LV': 110, 'LT': 130, 'LU': 130, 'MT': 80, 'NL': 100,
+  'PL': 140, 'PT': 120, 'RO': 130, 'SK': 130, 'SI': 130, 'ES': 120, 'SE': 110,
+};
+
 /// Средняя реальная скорость относительно лимита (светофоры, трафик).
 const classFactor = <double>[0.95, 0.9, 0.85, 0.8, 0.8, 0.8, 0.7, 0.6];
 
-/// Местные классы: доступны в зоне у старта/финиша независимо от фильтров.
+/// Местные классы: используются только для подъезда у старта и финиша.
 bool isLocalClass(int c) => c >= 4;
 
-enum TollMode {
-  any('Комбинировать'),
-  free('Только бесплатные'),
-  prefer('Предпочитать платные');
+/// Фиксированные параметры расчёта. Настроек у пользователя нет — всё автоматически.
+class RouteProfile {
+  /// Потолок скорости авто, км/ч.
+  static const vehicleMax = 130.0;
 
-  final String label;
-  const TollMode(this.label);
-}
-
-/// Что важнее. Денежной цены времени нет: «быстрее» — минимум времени (платные только при выигрыше во времени),
-/// «дешевле» — минимум платных дорог (из равных по стоимости — самый быстрый).
-enum Priority {
-  fastest('Быстрее'),
-  cheapest('Дешевле');
-
-  final String label;
-  const Priority(this.label);
-}
-
-class RoutePrefs {
-  Set<int> classes;
-  double minSpeed, maxSpeed, vehicleMax;
-  TollMode tollMode;
-  Priority priority;
-  double tollHigh, tollLow, tollEntry; // € за км на магистралях/шоссе, на прочих, за въезд
-  double accessRadius; // м у старта/финиша, где фильтры не действуют
-  double preferPenalty; // во сколько раз «дороже» бесплатные дороги в режиме prefer
-
-  RoutePrefs({
-    Set<int>? classes,
-    this.minSpeed = 0,
-    this.maxSpeed = 200,
-    this.vehicleMax = 110,
-    this.tollMode = TollMode.any,
-    this.priority = Priority.fastest,
-    this.tollHigh = 0.10,
-    this.tollLow = 0.07,
-    this.tollEntry = 0,
-    this.accessRadius = 800,
-    this.preferPenalty = 2.5,
-  }) : classes = classes ?? {for (var i = 0; i < roadClasses.length; i++) i};
-
-  double tollPerKm(int cls) => cls <= 1 ? tollHigh : tollLow;
-
-  RoutePrefs copy() => RoutePrefs.fromJson(toJson());
-
-  Map<String, Object?> toJson() => {
-        'classes': classes.toList()..sort(),
-        'minSpeed': minSpeed,
-        'maxSpeed': maxSpeed,
-        'vehicleMax': vehicleMax,
-        'tollMode': tollMode.name,
-        'priority': priority.name,
-        'tollHigh': tollHigh,
-        'tollLow': tollLow,
-        'tollEntry': tollEntry,
-        'accessRadius': accessRadius,
-        'preferPenalty': preferPenalty,
-      };
-
-  factory RoutePrefs.fromJson(Map<String, Object?> j) {
-    double d(String k, double def) => (j[k] as num?)?.toDouble() ?? def;
-    return RoutePrefs(
-      classes: (j['classes'] as List?)?.map((e) => (e as num).toInt()).toSet(),
-      minSpeed: d('minSpeed', 0),
-      maxSpeed: d('maxSpeed', 200),
-      vehicleMax: d('vehicleMax', 110),
-      tollMode: TollMode.values.firstWhere((m) => m.name == j['tollMode'], orElse: () => TollMode.any),
-      priority: Priority.values.firstWhere((m) => m.name == j['priority'], orElse: () => Priority.fastest),
-      tollHigh: d('tollHigh', 0.10),
-      tollLow: d('tollLow', 0.07),
-      tollEntry: d('tollEntry', 0),
-      accessRadius: d('accessRadius', 800),
-      preferPenalty: d('preferPenalty', 2.5),
-    );
-  }
+  /// Вес времени при выборе основного маршрута, € за час: платная дорога выбирается,
+  /// только если экономит больше 1,5 минуты на каждый евро. Иначе — бесплатные дороги.
+  static const mainLambda = 40.0;
 }
