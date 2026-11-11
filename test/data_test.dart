@@ -69,8 +69,9 @@ void main() {
       expect(m.of('AT')!.priceEur, 9.60);
       expect(m.of('SK')!.priceEur, 8.10);
       expect(m.of('SI')!.priceEur, 16.00);
-      expect(m.of('RO')!.confirmed, isFalse);
-      expect(m.of('BG')!.confirmed, isFalse);
+      expect(m.of('BG')!.priceEur, 5.30);
+      expect(m.of('BG')!.confirmed, isTrue, reason: 'сверено на сайте оператора');
+      expect(m.of('RO')!.confirmed, isFalse, reason: 'цена зависит от экологического класса авто');
     });
 
     test('ошибки в файле не роняют разбор', () {
