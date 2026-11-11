@@ -62,6 +62,14 @@ class VignetteCharge {
   const VignetteCharge(this.iso, this.product, this.priceEur, this.confirmed);
 }
 
+/// Платный объект (тоннель, мост), который проезжает маршрут.
+class ObjectCharge {
+  final String name;
+  final double priceEur;
+  final bool confirmed;
+  const ObjectCharge(this.name, this.priceEur, this.confirmed);
+}
+
 class RouteResult {
   final List<int> edges;
   final double hours, meters;
@@ -78,14 +86,17 @@ class RouteResult {
   /// Платные участки без известной цены (тоннели, мосты в странах без общей платы), м.
   final double tollUnknownMeters;
   final List<VignetteCharge> vignettes;
+  final List<ObjectCharge> objects;
   final Set<String> tags = {}; // best, fastest, free
   RouteResult(this.edges, this.hours, this.meters, this.distanceToll, this.tollMeters, this.tollOperatorMeters,
-      this.tollUnknownMeters, this.vignettes);
+      this.tollUnknownMeters, this.vignettes, this.objects);
+
+  double get objectCost => objects.fold(0.0, (s, v) => s + v.priceEur);
 
   double get vignetteCost => vignettes.fold(0.0, (s, v) => s + v.priceEur);
 
   /// Стоимость дороги — только платные дороги и виньетки.
-  double get money => distanceToll + vignetteCost;
+  double get money => distanceToll + vignetteCost + objectCost;
 }
 
 /// Подготовленные для одного поиска данные: допустимость рёбер, время, платежи.
@@ -94,7 +105,8 @@ class SearchContext {
   final TollModel tolls;
   final int startNode, endNode;
   final Uint8List allowed;
-  final Uint8List tollKind; // 0 — бесплатно, 1 — тариф оператора, 2 — ставка страны, 3 — цена неизвестна
+  final Uint8List tollKind; // 0 — бесплатно, 1 — тариф оператора, 2 — ставка страны, 3 — цена неизвестна, 4 — объект с ценой
+  final Uint8List obj; // платный объект (индекс + 1) или 0
   final Uint8List vig; // страна виньетки (индекс + 1) или 0
   final Float64List hours, toll;
   final Float64List vigFee; // цена виньетки по индексу страны + 1
@@ -103,6 +115,7 @@ class SearchContext {
       : allowed = Uint8List(g.edgeCount),
         tollKind = Uint8List(g.edgeCount),
         vig = Uint8List(g.edgeCount),
+        obj = Uint8List(g.edgeCount),
         hours = Float64List(g.edgeCount),
         toll = Float64List(g.edgeCount),
         vigFee = Float64List(g.countryIso.length + 1);
@@ -133,8 +146,17 @@ SearchContext prepare(RoadGraph g, int startNode, int endNode, TollModel tolls) 
       if (s.classes.contains(cls)) ctx.vig[i] = g.country[i];
     } else if (g.toll[i] == 1) {
       final rule = tolls.operators.matchCached(g.opIdx[i], g.refIdx[i], () => g.edgeOperator(i), () => g.edgeRef(i));
-      if (rule != null) {
-        ctx.toll[i] = km * rule.perKm;
+      final byRef = rule == null ? s?.rateForRef(g.edgeRef(i)) : null;
+      final iso = g.edgeCountry(i);
+      var o = -1;
+      for (var k = 0; k < tolls.objects.length && o < 0; k++) {
+        if (tolls.objects[k].country == iso && tolls.objects[k].matches(g.edgeName(i), g.edgeRef(i))) o = k;
+      }
+      if (o >= 0) {
+        ctx.obj[i] = o + 1; // фиксированная плата за объект, не за километры
+        ctx.tollKind[i] = 4;
+      } else if (rule != null || byRef != null) {
+        ctx.toll[i] = km * (rule?.perKm ?? byRef!);
         ctx.tollKind[i] = 1;
       } else if (s != null && s.scheme == TollScheme.distance) {
         ctx.toll[i] = km * s.perKm;
@@ -181,12 +203,18 @@ RouteResult? search(SearchContext ctx, double lambda) {
     final d = dist[s];
     final pe = prevE[s];
     final prevVig = pe < 0 ? 0 : ctx.vig[pe];
+    final prevObj = pe < 0 ? 0 : ctx.obj[pe];
     for (var k = g.outStart[node]; k < g.outStart[node + 1]; k++) {
       final ei = g.outEdges[k];
       if (ctx.allowed[ei] == 0) continue;
       final vg = ctx.vig[ei];
       final ns = g.to[ei] * 2 + (vg != 0 ? 1 : 0);
-      final c = d + ctx.hours[ei] * lambda + ctx.toll[ei] + (vg != 0 && vg != prevVig ? ctx.vigFee[vg] : 0);
+      final ob = ctx.obj[ei];
+      final c = d +
+          ctx.hours[ei] * lambda +
+          ctx.toll[ei] +
+          (vg != 0 && vg != prevVig ? ctx.vigFee[vg] : 0) +
+          (ob != 0 && ob != prevObj ? ctx.tolls.objects[ob - 1].priceEur : 0);
       if (c < dist[ns]) {
         dist[ns] = c;
         prevE[ns] = ei;
@@ -207,6 +235,7 @@ RouteResult summarize(SearchContext ctx, List<int> path) {
   final g = ctx.g;
   double hrs = 0, m = 0, tollM = 0, tollLen = 0, opLen = 0, unknown = 0;
   final vigs = <int>{};
+  final objs = <int>{};
   for (final e in path) {
     hrs += ctx.hours[e];
     m += g.len[e];
@@ -219,6 +248,7 @@ RouteResult summarize(SearchContext ctx, List<int> path) {
       unknown += g.len[e];
     }
     if (ctx.vig[e] != 0) vigs.add(ctx.vig[e]);
+    if (ctx.obj[e] != 0) objs.add(ctx.obj[e]);
   }
   final charges = [
     for (final c in vigs)
@@ -227,7 +257,11 @@ RouteResult summarize(SearchContext ctx, List<int> path) {
         return VignetteCharge(s.iso, s.product, s.priceEur, s.confirmed);
       }()
   ];
-  return RouteResult(path, hrs, m, tollM, tollLen, opLen, unknown, charges);
+  final objCharges = [
+    for (final o in objs)
+      ObjectCharge(ctx.tolls.objects[o - 1].name, ctx.tolls.objects[o - 1].priceEur, ctx.tolls.objects[o - 1].confirmed)
+  ];
+  return RouteResult(path, hrs, m, tollM, tollLen, opLen, unknown, charges, objCharges);
 }
 
 class PlanResult {

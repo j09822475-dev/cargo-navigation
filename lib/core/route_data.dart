@@ -29,6 +29,7 @@ class RouteData {
   final double meters;
   final double distanceToll, tollMeters, tollOperatorMeters, tollUnknownMeters;
   final List<VignetteCharge> vignettes;
+  final List<ObjectCharge> objects;
 
   /// Предупреждения по маршруту (погода и т. п.).
   final List<String> warnings;
@@ -38,16 +39,19 @@ class RouteData {
   final Uint8List edgeToll; // 1 — плата за км, 2 — дорога с виньеткой, 3 — платный объект без цены
   final List<Step> steps;
   const RouteData(this.tags, this.hours, this.weatherDelayHours, this.meters, this.distanceToll, this.tollMeters,
-      this.tollOperatorMeters, this.tollUnknownMeters, this.vignettes, this.warnings, this.pts, this.edgeStartPt,
+      this.tollOperatorMeters, this.tollUnknownMeters, this.vignettes, this.objects, this.warnings, this.pts, this.edgeStartPt,
       this.edgeSpeed, this.edgeToll, this.steps);
 
   double get vignetteCost => vignettes.fold(0.0, (s, v) => s + v.priceEur);
 
   /// Стоимость дороги: платные участки и виньетки, €.
-  double get money => distanceToll + vignetteCost;
+  double get objectCost => objects.fold(0.0, (s, v) => s + v.priceEur);
+  double get money => distanceToll + vignetteCost + objectCost;
 
   /// Есть ли в цене оценочные (неподтверждённые) составляющие.
-  bool get estimated => tollMeters - tollOperatorMeters > 1 || vignettes.any((v) => !v.confirmed) || tollUnknownMeters > 1;
+  bool get estimated => tollMeters - tollOperatorMeters > 1 || vignettes.any((v) => !v.confirmed) ||
+      objects.any((o) => !o.confirmed) ||
+      tollUnknownMeters > 1;
   int get pointCount => pts.length ~/ 2;
   int get edgeCount => edgeSpeed.length;
 }
@@ -97,7 +101,7 @@ RouteData buildRouteData(SearchContext ctx, RouteResult r,
     }
     speeds[k] = g.speed[e];
     final kind = ctx.tollKind[e];
-    tolls[k] = kind == 3 ? 3 : (kind != 0 ? 1 : (ctx.vig[e] != 0 ? 2 : 0));
+    tolls[k] = kind == 3 ? 3 : (kind != 0 ? 1 : (ctx.vig[e] != 0 ? 2 : 0)); // объект с ценой рисуем как платный участок
   }
   edgeStart[edges.length] = pts.length ~/ 2 - 1;
 
@@ -153,6 +157,6 @@ RouteData buildRouteData(SearchContext ctx, RouteResult r,
   steps.add(Step(TurnType.arrive, 'Вы прибыли в пункт назначения', '', 0, false, 0, lastLat, lastLon, edges.length));
 
   return RouteData(Set.of(tags ?? r.tags), hours ?? r.hours, (hours ?? r.hours) - r.hours, r.meters, r.distanceToll,
-      r.tollMeters, r.tollOperatorMeters, r.tollUnknownMeters, r.vignettes, warnings, Float64List.fromList(pts),
+      r.tollMeters, r.tollOperatorMeters, r.tollUnknownMeters, r.vignettes, r.objects, warnings, Float64List.fromList(pts),
       edgeStart, speeds, tolls, steps);
 }

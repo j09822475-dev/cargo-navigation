@@ -102,6 +102,60 @@ void main() {
     expect(r.tollUnknownMeters, greaterThan(1000));
   });
 
+  test('Италия: официальный тариф Autostrade per l\'Italia по оператору, A22 — по номеру дороги', () {
+    final aspi = graphOf(pair(10.9, 4, motorTags: {'toll': 'yes', 'operator': "Autostrade per l'Italia S.p.A.", 'ref': 'A1'}, lat: 44.6));
+    final r = planRoutes(aspi, const LatLon(44.6, 10.9), const LatLon(44.6, 11.3), tolls).routes!
+        .firstWhere((r) => r.distanceToll > 0);
+    expect(r.distanceToll / (r.tollMeters / 1000), closeTo(0.07869, 1e-5));
+    expect(r.tollOperatorMeters, closeTo(r.tollMeters, 1));
+
+    // у A22 оператор в данных не указан — ставка находится по номеру дороги
+    final a22 = graphOf(pair(11.0, 4, motorTags: {'toll': 'yes', 'ref': 'A22;E45'}, lat: 45.9));
+    final b = planRoutes(a22, const LatLon(45.9, 11.0), const LatLon(45.9, 11.4), tolls).routes!
+        .firstWhere((r) => r.distanceToll > 0);
+    expect(b.distanceToll / (b.tollMeters / 1000), closeTo(0.07002, 1e-5));
+
+    // прочие итальянские автострады — средняя ставка страны (оценка)
+    final other = graphOf(pair(10.9, 4, motorTags: {'toll': 'yes', 'ref': 'A99'}, lat: 44.6));
+    final c = planRoutes(other, const LatLon(44.6, 10.9), const LatLon(44.6, 11.3), tolls).routes!
+        .firstWhere((r) => r.distanceToll > 0);
+    expect(c.tollOperatorMeters, 0);
+  });
+
+  test('Бельгия и Нидерланды: магистрали бесплатны, платный тоннель — фиксированная цена один раз', () {
+    // магистраль — тоннель (два пути подряд) — магистраль; объезд по главной дороге
+    List<WaySpec> net(double lat, double lon, Map<String, String> tunnel) {
+      final n = [for (var i = 0; i <= 6; i++) (100 + i, lat, lon + 0.05 * i)];
+      return [
+        WaySpec(1, {'highway': 'motorway', 'maxspeed': '120', 'name': 'Запад'}, n.sublist(0, 3)),
+        WaySpec(2, {'highway': 'motorway', 'maxspeed': '100', 'toll': 'yes', ...tunnel}, n.sublist(2, 4)),
+        WaySpec(3, {'highway': 'motorway', 'maxspeed': '100', 'toll': 'yes', ...tunnel}, n.sublist(3, 5)),
+        WaySpec(4, {'highway': 'motorway', 'maxspeed': '120', 'name': 'Восток'}, n.sublist(4)),
+        WaySpec(5, {'highway': 'primary', 'maxspeed': '50', 'name': 'Объезд'}, [n.first, (201, lat + 0.25, lon + 0.15), n.last]),
+      ];
+    }
+
+    final be = graphOf(net(51.3, 4.2, {'name': 'Liefkenshoektunnel', 'ref': 'R2'}));
+    final res = planRoutes(be, const LatLon(51.3, 4.2), const LatLon(51.3, 4.5), tolls);
+    final viaTunnel = res.routes!.firstWhere((r) => r.objects.isNotEmpty);
+    expect(viaTunnel.objects.single.name, contains('Лифкенсхук'));
+    expect(viaTunnel.money, closeTo(6.20, 1e-9), reason: 'одна плата, хотя тоннель состоит из двух путей');
+    expect(viaTunnel.distanceToll, 0);
+    expect(viaTunnel.tollUnknownMeters, 0);
+    expect(res.routes!.any((r) => r.money == 0 && r.tags.contains('free')), isTrue);
+
+    final nl = graphOf(net(51.9, 4.2, {'name': 'Blankenburgverbinding', 'ref': 'A24'}));
+    final a24 = planRoutes(nl, const LatLon(51.9, 4.2), const LatLon(51.9, 4.5), tolls).routes!
+        .firstWhere((r) => r.objects.isNotEmpty);
+    expect(a24.money, closeTo(1.57, 1e-9));
+
+    // обычная магистраль без платных объектов — бесплатно и без предупреждений
+    final free = graphOf(pair(4.2, 6, lat: 51.3));
+    final f = planRoutes(free, const LatLon(51.3, 4.2), const LatLon(51.3, 4.8), tolls).routes!.first;
+    expect(f.money, 0);
+    expect(f.tollUnknownMeters, 0);
+  });
+
   test('дороги в странах вне ЕС отбрасываются', () {
     // прямая дорога через Швейцарию и объезд по Германии/Австрии… проверяем только отбрасывание
     final gg = graphOf([

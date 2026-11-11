@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "operator": "Autostrada del Brennero",
+  "aliases": [
+    "Autostrada del Brennero S.p.A.",
+    "Autostrada del Brennero SpA",
+    "Autobrennero",
+    "Brennerautobahn AG",
+    "Autostrada del Brennero S.p.A. - Brennerautobahn AG"
+  ],
+  "country": "IT",
+  "updated": "2026-01",
+  "source": "https://www.autobrennero.it/media/fzulutir/it_tariffe-a22_2026.pdf",
+  "note": "Официальный тариф A22 класса A с НДС на 1 января 2026: равнина 0,06412 EUR/км, горы 0,07592 EUR/км. Взято среднее 0,07002, так как приложение не различает равнинные и горные участки.",
+  "rules": [
+    {
+      "perKm": 0.07002
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "operator": "Autostrade per l'Italia",
+  "aliases": [
+    "Autostrade per l'Italia S.p.A.",
+    "Autostrade per l'Italia SpA",
+    "Autostrade per l’Italia",
+    "Autostrade per l’Italia S.p.A.",
+    "ASPI"
+  ],
+  "country": "IT",
+  "updated": "2026-01",
+  "source": "https://www.autostrade.it/it/il-pedaggio/come-si-calcola-il-pedaggio",
+  "note": "Официальный единичный тариф класса A (легковые) с НДС на 1 января 2026: равнина 0,07869 EUR/км, горные участки 0,09315 EUR/км. Приложение не различает равнинные и горные участки и берёт равнинный тариф, поэтому в горах цена занижена примерно на 18%. Итог у оператора округляется до 10 центов.",
+  "rules": [
+    {
+      "perKm": 0.07869
+    }
+  ]
+}

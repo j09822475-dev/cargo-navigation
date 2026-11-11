@@ -66,6 +66,14 @@ void main() {
         expect(c.confirmed, isFalse, reason: 'средние ставки — оценка');
       }
       expect(m.of('DE'), isNull, reason: 'Германия — бесплатно');
+      expect(m.of('BE'), isNull);
+      expect(m.of('NL'), isNull);
+      expect(m.of('IT')!.rateForRef('A22;E45'), closeTo(0.07002, 1e-9));
+      expect(m.objects.map((o) => o.country).toSet(), {'BE', 'NL'});
+      for (final o in m.objects) {
+        expect(o.priceEur, inInclusiveRange(1, 10));
+        expect(o.source, startsWith('https://'));
+      }
       expect(m.of('AT')!.priceEur, 9.60);
       expect(m.of('SK')!.priceEur, 8.10);
       expect(m.of('SI')!.priceEur, 16.00);
@@ -91,11 +99,21 @@ void main() {
       expect(book.match('APRR', 'A6')!.perKm, closeTo(0.112, 0.001));
       expect(book.match('Autoroutes Paris-Rhin-Rhône', 'A31'), isNotNull);
       expect(book.match('Vinci', 'A7'), isNull);
+      expect(book.match("Autostrade per l'Italia", 'A1')!.perKm, 0.07869);
+      expect(book.match('Autostrada del Brennero S.p.A.', 'A22')!.perKm, closeTo(0.07002, 1e-9));
       expect(book.match('', 'A6'), isNull);
       for (final r in book.rules) {
         expect(r.perKm, inInclusiveRange(0.03, 0.6));
         expect(r.source, startsWith('https://'));
       }
+    });
+
+    test('кэш тарифов не путает операторов между разными графами', () {
+      final b = TariffBook.parse(operatorFiles());
+      // одинаковые индексы строк, разные значения — как у двух разных графов
+      expect(b.matchCached(1, 1, () => 'APRR', () => 'A6')!.perKm, closeTo(0.112, 0.001));
+      expect(b.matchCached(1, 1, () => "Autostrade per l'Italia", () => 'A1')!.perKm, 0.07869);
+      expect(b.matchCached(1, 1, () => 'Неизвестный', () => 'A1'), isNull);
     });
 
     test('импорт из CSV', () {

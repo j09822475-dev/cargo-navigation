@@ -38,7 +38,7 @@ class TariffBook {
   final List<TariffRule> rules;
   // индекс: «оператор|ref» и «оператор|» (по умолчанию)
   final Map<String, TariffRule> _index = {};
-  final Map<int, TariffRule?> _cache = {};
+  final Map<String, TariffRule?> _cache = {};
 
   TariffBook(this.rules) {
     for (final r in rules) {
@@ -101,10 +101,12 @@ class TariffBook {
     return null;
   }
 
-  /// То же с кэшем по индексам строк графа (вызывается для каждого платного ребра).
+  /// То же с кэшем по значениям тегов (вызывается для каждого платного ребра).
+  /// Кэш именно по строкам: индексы строк у каждого графа свои, а таблица тарифов общая.
   TariffRule? matchCached(int opIdx, int refIdx, String Function() op, String Function() ref) {
-    final key = opIdx * 4194304 + refIdx;
+    final o = op(), r = ref();
+    final key = '$o\u0000$r';
     if (_cache.containsKey(key)) return _cache[key];
-    return _cache[key] = match(op(), ref());
+    return _cache[key] = match(o, r);
   }
 }

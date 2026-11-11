@@ -1,3 +1,8 @@
 {
-  "files": ["area.json", "aprr.json"]
+  "files": [
+    "area.json",
+    "aprr.json",
+    "it_aspi.json",
+    "it_a22.json"
+  ]
 }

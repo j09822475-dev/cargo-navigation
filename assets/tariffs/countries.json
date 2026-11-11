@@ -1,29 +1,171 @@
 {
   "schema": 1,
   "updated": "2026-11",
-  "note": "Цены для легкового авто до 3,5 т. Виньетка — самый короткий срок действия. Сверено на сайтах операторов 2026-11-11: Словакия (eznamka.sk) и Болгария (web.bgtoll.bg). Румыния — с сайта продавца виньеток roviniete.ro: цена зависит от экологического класса авто, взят класс Euro IV–V, курс 5,3368 RON за евро с той же страницы. Австрия, Чехия, Словения, Венгрия — из публикаций со ссылкой на операторов: их сайты не открылись (отказ сайта или страница без данных). Курсы приблизительные: 24,5 CZK и 395 HUF за евро. Плата за километр по странам — оценка. Особые платные участки (тоннели, мосты, перевалы) не учтены.",
+  "note": "Цены для легкового авто до 3,5 т. Виньетка — самый короткий срок действия. Сверено на сайтах операторов 2026-11-11: Словакия (eznamka.sk) и Болгария (web.bgtoll.bg). Румыния — с сайта продавца виньеток roviniete.ro: цена зависит от экологического класса авто, взят класс Euro IV–V, курс 5,3368 RON за евро с той же страницы. Австрия, Чехия, Словения, Венгрия — из публикаций со ссылкой на операторов: их сайты не открылись (отказ сайта или страница без данных). Курсы приблизительные: 24,5 CZK и 395 HUF за евро. Плата за километр по странам — оценка, кроме операторов из отдельных файлов (Италия: Autostrade per l'Italia и A22 — официальные тарифы 2026; Франция: APRR и AREA). Бельгия и Нидерланды: для легковых платны только отдельные тоннели (objects). Особые платные участки (тоннели, мосты, перевалы) не учтены.",
   "countries": {
-    "AT": {"scheme": "vignette", "priceEur": 9.60, "product": "1 день", "classes": [0, 1], "confirmed": true,
-           "source": "https://www.oesterreich.gv.at/themen/mobilitaet/kfz/10/Vignette-und-Maut/Vignette-fuer-Fahrzeuge-bis-3,5-t"},
-    "CZ": {"scheme": "vignette", "priceEur": 9.40, "original": "230 CZK", "product": "1 день", "classes": [0], "confirmed": true,
-           "source": "https://www.e15.cz/dalnicni-znamka-2026"},
-    "SK": {"scheme": "vignette", "priceEur": 8.10, "product": "1 день", "classes": [0, 1], "confirmed": true,
-           "source": "https://eznamka.sk/sk/dialnicne-znamky/typy-a-ceny"},
-    "SI": {"scheme": "vignette", "priceEur": 16.00, "product": "7 дней", "classes": [0, 1], "confirmed": true,
-           "source": "https://n1info.si/novice/slovenija/vinjeta-tokrat-drugace-veste-naj-vam-je-storiti/"},
-    "HU": {"scheme": "vignette", "priceEur": 14.05, "original": "5550 HUF", "product": "1 день", "classes": [0, 1], "confirmed": true,
-           "source": "https://vintrica.com/hu/blog/matrica-magyarorszag-2026-arak/"},
-    "RO": {"scheme": "vignette", "priceEur": 4.87, "original": "26 RON (Euro IV–V; от 20 до 29 RON по экологическому классу)", "product": "1 день", "classes": [0, 1, 2], "confirmed": false,
-           "source": "https://www.roviniete.ro/ro/info/rovinieta-pret"},
-    "BG": {"scheme": "vignette", "priceEur": 5.30, "product": "1 день", "classes": [0, 1, 2], "confirmed": true,
-           "source": "https://web.bgtoll.bg/Evignette/ValidityPeriod?vignetteVehicleTypeID=1"},
-    "FR": {"scheme": "distance", "perKm": 0.112, "confirmed": false,
-           "source": "https://www.data.gouv.fr/datasets/tarifs-autoroutes-aprr"},
-    "IT": {"scheme": "distance", "perKm": 0.08, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
-    "ES": {"scheme": "distance", "perKm": 0.10, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
-    "PT": {"scheme": "distance", "perKm": 0.085, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
-    "HR": {"scheme": "distance", "perKm": 0.07, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
-    "GR": {"scheme": "distance", "perKm": 0.045, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"},
-    "PL": {"scheme": "distance", "perKm": 0.115, "confirmed": false, "source": "https://autotouring.acl.lu/?p=9414"}
-  }
+    "AT": {
+      "scheme": "vignette",
+      "priceEur": 9.6,
+      "product": "1 день",
+      "classes": [
+        0,
+        1
+      ],
+      "confirmed": true,
+      "source": "https://www.oesterreich.gv.at/themen/mobilitaet/kfz/10/Vignette-und-Maut/Vignette-fuer-Fahrzeuge-bis-3,5-t"
+    },
+    "CZ": {
+      "scheme": "vignette",
+      "priceEur": 9.4,
+      "original": "230 CZK",
+      "product": "1 день",
+      "classes": [
+        0
+      ],
+      "confirmed": true,
+      "source": "https://www.e15.cz/dalnicni-znamka-2026"
+    },
+    "SK": {
+      "scheme": "vignette",
+      "priceEur": 8.1,
+      "product": "1 день",
+      "classes": [
+        0,
+        1
+      ],
+      "confirmed": true,
+      "source": "https://eznamka.sk/sk/dialnicne-znamky/typy-a-ceny"
+    },
+    "SI": {
+      "scheme": "vignette",
+      "priceEur": 16.0,
+      "product": "7 дней",
+      "classes": [
+        0,
+        1
+      ],
+      "confirmed": true,
+      "source": "https://n1info.si/novice/slovenija/vinjeta-tokrat-drugace-veste-naj-vam-je-storiti/"
+    },
+    "HU": {
+      "scheme": "vignette",
+      "priceEur": 14.05,
+      "original": "5550 HUF",
+      "product": "1 день",
+      "classes": [
+        0,
+        1
+      ],
+      "confirmed": true,
+      "source": "https://vintrica.com/hu/blog/matrica-magyarorszag-2026-arak/"
+    },
+    "RO": {
+      "scheme": "vignette",
+      "priceEur": 4.87,
+      "original": "26 RON (Euro IV–V; от 20 до 29 RON по экологическому классу)",
+      "product": "1 день",
+      "classes": [
+        0,
+        1,
+        2
+      ],
+      "confirmed": false,
+      "source": "https://www.roviniete.ro/ro/info/rovinieta-pret"
+    },
+    "BG": {
+      "scheme": "vignette",
+      "priceEur": 5.3,
+      "product": "1 день",
+      "classes": [
+        0,
+        1,
+        2
+      ],
+      "confirmed": true,
+      "source": "https://web.bgtoll.bg/Evignette/ValidityPeriod?vignetteVehicleTypeID=1"
+    },
+    "FR": {
+      "scheme": "distance",
+      "perKm": 0.112,
+      "confirmed": false,
+      "source": "https://www.data.gouv.fr/datasets/tarifs-autoroutes-aprr"
+    },
+    "IT": {
+      "scheme": "distance",
+      "perKm": 0.08,
+      "confirmed": false,
+      "refRates": {
+        "A22": 0.07002
+      },
+      "source": "https://www.autostrade.it/it/il-pedaggio/come-si-calcola-il-pedaggio"
+    },
+    "ES": {
+      "scheme": "distance",
+      "perKm": 0.1,
+      "confirmed": false,
+      "source": "https://autotouring.acl.lu/?p=9414"
+    },
+    "PT": {
+      "scheme": "distance",
+      "perKm": 0.085,
+      "confirmed": false,
+      "source": "https://autotouring.acl.lu/?p=9414"
+    },
+    "HR": {
+      "scheme": "distance",
+      "perKm": 0.07,
+      "confirmed": false,
+      "source": "https://autotouring.acl.lu/?p=9414"
+    },
+    "GR": {
+      "scheme": "distance",
+      "perKm": 0.045,
+      "confirmed": false,
+      "source": "https://autotouring.acl.lu/?p=9414"
+    },
+    "PL": {
+      "scheme": "distance",
+      "perKm": 0.115,
+      "confirmed": false,
+      "source": "https://autotouring.acl.lu/?p=9414"
+    }
+  },
+  "objects": [
+    {
+      "country": "BE",
+      "name": "Тоннель Лифкенсхук (Антверпен)",
+      "match": [
+        "liefkenshoek"
+      ],
+      "priceEur": 6.2,
+      "confirmed": false,
+      "source": "https://www.tolls.eu/belgium",
+      "note": "Оплата картой; наличными 8,00, с транспондером 4,40. Сайт оператора не открылся."
+    },
+    {
+      "country": "NL",
+      "name": "Килтоннель (Дордрехт)",
+      "match": [
+        "kiltunnel"
+      ],
+      "priceEur": 2.0,
+      "confirmed": false,
+      "source": "https://travelinformation.eu/netherlands/toll-roads/",
+      "note": "Сайт оператора не открылся."
+    },
+    {
+      "country": "NL",
+      "name": "Бланкенбургский тоннель (A24)",
+      "match": [
+        "blankenburg"
+      ],
+      "refs": [
+        "A24"
+      ],
+      "priceEur": 1.57,
+      "confirmed": false,
+      "source": "https://travelinformation.eu/netherlands/toll-roads/",
+      "note": "На сайте e-tol.nl цена в открытом виде не найдена."
+    }
+  ]
 }

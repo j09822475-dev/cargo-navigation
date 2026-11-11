@@ -450,6 +450,10 @@ class _HomePageState extends State<HomePage> {
       out.add(_infoRow(Icons.toll, 'Плата за проезд: ${est ? '≈ ' : ''}${fmtMoney(r.distanceToll)} за ${fmtDist(r.tollMeters)}'
           '${est ? ' (средняя ставка по стране — оценка)' : ' (тариф оператора)'}', _tollOrange));
     }
+    for (final o in r.objects) {
+      out.add(_infoRow(Icons.toll, '${o.name}: ${o.confirmed ? '' : '≈ '}${fmtMoney(o.priceEur)}'
+          '${o.confirmed ? '' : ' — цена требует проверки'}', _tollOrange));
+    }
     for (final v in r.vignettes) {
       out.add(_infoRow(Icons.confirmation_number_outlined,
           'Виньетка, ${countryNamesRu[v.iso] ?? v.iso} (${v.product}): ${v.confirmed ? '' : '≈ '}${fmtMoney(v.priceEur)}'
