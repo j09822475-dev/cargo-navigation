@@ -7,6 +7,9 @@ import '../core/geo.dart';
 import '../core/road_graph.dart';
 import 'road_source.dart';
 
+/// Чем приложение представляется серверам (правила публичных серверов OSM требуют осмысленный User-Agent).
+const userAgent = 'CargoNavigation/1.0 (Android; +https://github.com/j09822475-dev/cargo-navigation)';
+
 /// Публичные серверы Overpass; пробуются по очереди.
 const overpassEndpoints = <String>[
   'https://overpass-api.de/api/interpreter',
@@ -143,7 +146,9 @@ class OverpassSource implements RoadSource {
         cancel.check();
         final host = Uri.parse(url).host;
         try {
-          final res = await _client.post(Uri.parse(url), body: {'data': query}).timeout(requestTimeout);
+          final res = await _client
+              .post(Uri.parse(url), headers: const {'User-Agent': userAgent}, body: {'data': query})
+              .timeout(requestTimeout);
           if (res.statusCode == 429 || res.statusCode == 502 || res.statusCode == 503 || res.statusCode == 504) {
             failures[host] = 'перегружен (${res.statusCode})';
             busy = true;

@@ -27,9 +27,10 @@ List<WaySpec> longNetwork() {
   specs.add(WaySpec(3, {'highway': 'motorway', 'maxspeed': '130', 'name': 'М восток'}, motor.sublist(22)));
   specs.add(WaySpec(2, {'highway': 'primary', 'maxspeed': '80', 'name': 'Главное шоссе'}, prim));
   for (var i = 0; i < n; i += 6) {
-    specs.add(WaySpec(100 + i, {'highway': 'secondary', 'maxspeed': '60', 'name': 'Связка $i'}, [motor[i], prim[i]]));
+    // связки — главные дороги: они входят в каркас и делят магистраль на участки, как развязки в жизни
+    specs.add(WaySpec(100 + i, {'highway': 'primary', 'maxspeed': '60', 'name': 'Связка $i'}, [motor[i], prim[i]]));
   }
-  specs.add(WaySpec(99, {'highway': 'secondary', 'maxspeed': '60', 'name': 'Связка у финиша'}, [motor.last, prim.last]));
+  specs.add(WaySpec(99, {'highway': 'primary', 'maxspeed': '60', 'name': 'Связка у финиша'}, [motor.last, prim.last]));
   specs.add(WaySpec(5, {'highway': 'residential', 'name': 'ул. Старта'}, [(1, lat + 0.004, -4.004), motor.first]));
   specs.add(WaySpec(6, {'highway': 'residential', 'name': 'ул. Финиша'}, [motor.last, (2, lat + 0.004, 19.504)]));
   return specs;
@@ -77,12 +78,13 @@ void main() {
     expect(out.note, contains('Дальний маршрут'));
 
     final corridors = src.calls.where((c) => c.kind == 'corridor').toList();
-    expect(corridors.length, greaterThan(10), reason: 'данные грузятся кусками');
+    expect(corridors.length, inInclusiveRange(10, 16), reason: 'один запрос на участок ~150 км, без серий по типам дорог');
     for (final c in corridors) {
       expect(c.lengthMeters, lessThanOrEqualTo(160000));
+      expect(c.classes, {0, 1, 2}, reason: 'магистрали, шоссе и главные дороги одним запросом');
     }
-    expect(corridors.first.classes.difference({0, 1}), isEmpty, reason: 'сначала каркас из магистралей');
-    expect(corridors.any((c) => c.radius == 3000), isTrue, reason: 'затем уточнение вдоль трассы');
+    expect(corridors.any((c) => c.radius == 3000), isFalse, reason: 'на дальних маршрутах уточнение не делается');
+    expect(src.calls.length, lessThan(25), reason: 'всего запросов немного');
     expect(progress.any((m) => m.contains('участок')), isTrue);
     // бесплатная альтернатива по главному шоссе
     expect(out.routes!.any((r) => r.tags.contains('free')), isTrue);
@@ -129,6 +131,9 @@ void main() {
     expect(r.meters / 1000, greaterThan(400), reason: 'объезд длиннее прямой (255 км)');
     expect(r.steps.any((s) => s.text.contains('Через Швейцарию')), isFalse);
     expect(r.vignettes.map((v) => v.iso), contains('AT'));
+    // маршрут средней длины уточняется местными дорогами вдоль трассы, и запросов при этом немного
+    expect(src.calls.any((c) => c.kind == 'corridor' && c.radius == 3000), isTrue);
+    expect(src.calls.length, lessThan(25));
   });
 
   test('точки вне ЕС и вне Европы отклоняются с понятным сообщением', () async {
@@ -206,6 +211,7 @@ void main() {
       final hosts = <String>[];
       final s = src((r) async {
         hosts.add(r.url.host);
+        expect(r.headers['User-Agent'], startsWith('CargoNavigation/'));
         if (r.url.host == 'a.example') throw http.ClientException('Failed host lookup: a.example');
         return http.Response(ok, 200);
       });
@@ -255,6 +261,24 @@ void main() {
       expect(out.routes, isNull);
       expect(out.error, contains('Проверьте интернет'));
     });
+  });
+
+  test('Таллин → Милан: опорная линия идёт по ЕС в обход Калининграда и Швейцарии', () {
+    const tallinn = LatLon(59.437, 24.754), milan = LatLon(45.464, 9.19);
+    final line = engineOf(FakeSource(const [])).spine(tallinn, milan);
+    final seq = <String>[];
+    for (final p in line) {
+      expect(countries.isDeepNonEu(p.lat, p.lon), isFalse);
+      final c = countries.isoAt(p.lat, p.lon);
+      if (c != null && (seq.isEmpty || seq.last != c)) seq.add(c);
+    }
+    expect(seq.first, 'EE');
+    expect(seq.last, 'IT');
+    expect(seq, containsAllInOrder(['EE', 'LV', 'LT', 'PL']));
+    expect(seq, isNot(contains('RU')));
+    expect(seq, isNot(contains('CH')));
+    // участков по ~150 км — около полутора десятков: столько и запросов к серверу
+    expect(RoutingEngine.chunkLine(line, RoutingEngine.chunkMeters).length, inInclusiveRange(12, 18));
   });
 
   test('отмена прерывает загрузку', () async {

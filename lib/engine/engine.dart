@@ -37,6 +37,7 @@ class RoutingEngine {
   static const maxMeters = 6000000.0;
   static const chunkMeters = 150000.0;
   static const spineStepMeters = 30000.0;
+  static const refineMaxMeters = 500000.0;
 
   RoutingEngine(this.source, {CountryIndex? countries, TollModel? tolls, this.weather})
       : countries = countries ?? CountryIndex.empty,
@@ -346,10 +347,9 @@ class RoutingEngine {
     for (final (tier, radius) in attempts) {
       cancel.check();
       await _zones(start, end, cancel, wide: {0, 1, 2, 3, 4});
-      for (final c in tier) {
-        await _fetchCorridor('spine|${radius.round()}|$c', line, radius, {c}, chunkMeters,
-            'дороги «${classLabels[c].toLowerCase()}» (коридор ${(radius * 2 / 1000).round()} км)', progress, cancel);
-      }
+      // один запрос на участок сразу для всех типов дорог: публичные серверы не терпят длинных серий запросов
+      await _fetchCorridor('spine|${radius.round()}|${tier.join(',')}', line, radius, tier, chunkMeters,
+          'магистрали и главные дороги (коридор ${(radius * 2 / 1000).round()} км)', progress, cancel);
       progress?.call('Строю граф дорог…');
       final g = _rebuild();
       progress?.call('Ищу маршрут по каркасу дорог…');
@@ -367,27 +367,27 @@ class RoutingEngine {
           distanceKm: km);
     }
 
-    // Уточнение: узкий коридор вокруг найденных маршрутов с дорогами помельче.
+    // Уточнение: узкий коридор вокруг найденного маршрута с дорогами помельче. Только для маршрутов
+    // до [refineMaxMeters]: на дальних оно почти не меняет результат, а запросов требует десятки.
     final note = 'Дальний маршрут (${km.round()} км по прямой).';
     final extra = {0, 1, 2, 3, 4, 5}.difference(usedTier);
-    try {
-      final g = coarse.ctx!.g;
-      final best = coarse.routes!.first;
-      final rl = _routeLine(g, best, 10000);
-      final hash = Object.hashAll(best.edges);
-      for (final c in extra) {
-        await _fetchCorridor('refine|$hash|$c', rl, 3000, {c}, 100000,
-            'уточнение вдоль трассы («${classLabels[c].toLowerCase()}»)', progress, cancel);
+    if (d <= refineMaxMeters) {
+      try {
+        final g = coarse.ctx!.g;
+        final best = coarse.routes!.first;
+        final rl = _routeLine(g, best, 10000);
+        await _fetchCorridor('refine|${Object.hashAll(best.edges)}', rl, 3000, extra, 100000,
+            'местные дороги вдоль трассы', progress, cancel);
+        progress?.call('Строю граф дорог…');
+        final g2 = _rebuild();
+        progress?.call('Пересчитываю маршруты…');
+        final refined = planRoutes(g2, start, end, tolls);
+        if (refined.routes != null) return await _finish(refined, km, note, progress, cancel);
+      } on CancelledException {
+        rethrow;
+      } catch (_) {
+        // уточнение не удалось — показываем маршрут по каркасу
       }
-      progress?.call('Строю граф дорог…');
-      final g2 = _rebuild();
-      progress?.call('Пересчитываю маршруты…');
-      final refined = planRoutes(g2, start, end, tolls);
-      if (refined.routes != null) return await _finish(refined, km, note, progress, cancel);
-    } on CancelledException {
-      rethrow;
-    } catch (_) {
-      // уточнение не удалось — показываем маршрут по каркасу
       _graph = coarse.ctx!.g;
     }
     return _finish(coarse, km, note, progress, cancel);
