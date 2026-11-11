@@ -7,10 +7,12 @@ import '../core/geo.dart';
 import '../core/road_graph.dart';
 import 'road_source.dart';
 
+/// Публичные серверы Overpass; пробуются по очереди.
 const overpassEndpoints = <String>[
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
 ];
 
 /// Запрос на пути в прямоугольнике.
@@ -71,13 +73,39 @@ class OverpassException implements Exception {
 class OverpassSource implements RoadSource {
   final http.Client _client;
   final List<String> endpoints;
+
+  /// Пауза перед повтором, когда сервер перегружен (429/502/503/504); растёт с каждым кругом.
   final Duration retryDelay;
-  OverpassSource({http.Client? client, this.endpoints = overpassEndpoints, this.retryDelay = const Duration(seconds: 3)})
+  final Duration requestTimeout;
+  OverpassSource(
+      {http.Client? client,
+      this.endpoints = overpassEndpoints,
+      this.retryDelay = const Duration(seconds: 6),
+      this.requestTimeout = const Duration(seconds: 200)})
       : _client = client ?? http.Client();
 
   @override
-  Future<WayData> fetchBox(Bbox box, Set<int> classes, CancelToken cancel) =>
-      _run(boxQuery(box, classes), cancel);
+  Future<WayData> fetchBox(Bbox box, Set<int> classes, CancelToken cancel) async {
+    // Если область не отдают целиком (таймаут, перегрузка) — делим её на четыре части.
+    try {
+      return await _run(boxQuery(box, classes), cancel);
+    } on CancelledException {
+      rethrow;
+    } catch (e) {
+      if ((box.north - box.south) < 0.08 && (box.east - box.west) < 0.08) rethrow;
+      final mLat = (box.south + box.north) / 2, mLon = (box.west + box.east) / 2;
+      final parts = <WayData>[];
+      for (final b in [
+        Bbox(box.south, box.west, mLat, mLon),
+        Bbox(box.south, mLon, mLat, box.east),
+        Bbox(mLat, box.west, box.north, mLon),
+        Bbox(mLat, mLon, box.north, box.east),
+      ]) {
+        parts.add(await _run(boxQuery(b, classes), cancel));
+      }
+      return mergeWayData(parts);
+    }
+  }
 
   @override
   Future<WayData> fetchCorridor(List<LatLon> line, double radiusM, Set<int> classes, CancelToken cancel) async {
@@ -95,33 +123,53 @@ class OverpassSource implements RoadSource {
     }
   }
 
+  /// Короткое описание сбоя для сообщения пользователю.
+  static String describeError(Object e) {
+    final t = e.toString();
+    if (e is TimeoutException) return 'нет ответа';
+    if (t.contains('Failed host lookup')) return 'адрес сервера не найден';
+    if (t.contains('SocketException') || t.contains('Connection')) return 'нет соединения';
+    if (t.contains('HandshakeException') || t.contains('CERTIFICATE')) return 'ошибка защищённого соединения';
+    if (e is OverpassException) return e.message;
+    if (e is FormatException) return 'непонятный ответ';
+    return t.length > 60 ? '${t.substring(0, 60)}…' : t;
+  }
+
   Future<WayData> _run(String query, CancelToken cancel) async {
-    Object? last;
-    for (var round = 0; round < 2; round++) {
+    final failures = <String, String>{}; // сервер → причина последнего сбоя
+    for (var round = 0; round < 3; round++) {
+      var busy = false;
       for (final url in endpoints) {
         cancel.check();
+        final host = Uri.parse(url).host;
         try {
-          final res = await _client
-              .post(Uri.parse(url), body: {'data': query})
-              .timeout(const Duration(seconds: 200));
-          if (res.statusCode == 429 || res.statusCode == 504 || res.statusCode == 502) {
-            last = OverpassException('Overpass ${res.statusCode}');
-            await Future<void>.delayed(retryDelay);
+          final res = await _client.post(Uri.parse(url), body: {'data': query}).timeout(requestTimeout);
+          if (res.statusCode == 429 || res.statusCode == 502 || res.statusCode == 503 || res.statusCode == 504) {
+            failures[host] = 'перегружен (${res.statusCode})';
+            busy = true;
             continue;
           }
           if (res.statusCode != 200) {
-            last = OverpassException('Overpass ${res.statusCode}');
+            failures[host] = 'ответ ${res.statusCode}';
             continue;
           }
           return parseOverpass(utf8.decode(res.bodyBytes));
         } on CancelledException {
           rethrow;
         } catch (e) {
-          last = e;
+          failures[host] = describeError(e);
         }
       }
+      // повторяем круг, только если хоть один сервер жив, но занят
+      if (!busy) break;
+      cancel.check();
+      await Future<void>.delayed(retryDelay * (round + 1));
     }
-    throw OverpassException('Не удалось загрузить данные OpenStreetMap: ${last ?? 'ошибка сети'}');
+    final noNetwork = failures.values.every((v) => v == 'адрес сервера не найден' || v == 'нет соединения');
+    final details = failures.entries.map((e) => '${e.key} — ${e.value}').join('; ');
+    throw OverpassException(noNetwork
+        ? 'Нет связи с серверами дорожных данных. Проверьте интернет (и VPN, если он включён). ($details)'
+        : 'Серверы дорожных данных OpenStreetMap сейчас не отвечают. Попробуйте ещё раз через минуту. ($details)');
   }
 }
 

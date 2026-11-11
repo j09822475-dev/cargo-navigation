@@ -95,6 +95,10 @@ class RoutingEngine {
     } on CancelledException {
       _graph = null;
       rethrow;
+    } catch (e) {
+      // сбой загрузки — понятное сообщение вместо технической ошибки
+      _graph = null;
+      return PlanOutcome(error: '$e', distanceKm: km);
     }
   }
 
@@ -190,11 +194,15 @@ class RoutingEngine {
     final lonPad = math.max(0.03 / cosLat, (start.lon - end.lon).abs() * 0.25);
     final west = math.min(start.lon, end.lon) - lonPad, east = math.max(start.lon, end.lon) + lonPad;
     final area = (north - south) * 111 * (east - west) * 111 * cosLat;
+    // Чем больше область, тем крупнее дороги: все улицы большого города — это десятки мегабайт,
+    // публичные серверы такое не отдают. Улицы у старта и финиша догружаются отдельно (_zones).
     var mid = _all;
     if (area > 10000) {
       mid = {0, 1, 2, 3};
     } else if (area > 1500) {
       mid = {0, 1, 2, 3, 4};
+    } else if (area > 150) {
+      mid = {0, 1, 2, 3, 4, 5};
     }
     cancel.check();
     progress?.call('Загружаю дороги…');

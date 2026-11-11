@@ -9,6 +9,8 @@ import 'package:cargo_navigation/engine/open_meteo.dart';
 import 'package:cargo_navigation/engine/overpass_source.dart';
 import 'package:cargo_navigation/engine/road_source.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'helpers.dart';
 
@@ -190,6 +192,69 @@ void main() {
     expect(weatherEffect(const WeatherPoint(precipitation: 2)).factor, 0.9);
     final s = samplePolyline([47.0, 3.0, 47.0, 4.0, 47.0, 5.0], 40000, 8);
     expect(s.length, 4);
+  });
+
+  group('сбои серверов Overpass', () {
+    const ok = '{"elements":[{"type":"way","id":1,"nodes":[1,2],"geometry":[{"lat":45.0,"lon":9.0},{"lat":45.0,"lon":9.1}],"tags":{"highway":"primary"}}]}';
+    OverpassSource src(Future<http.Response> Function(http.Request r) h, {List<String>? endpoints}) => OverpassSource(
+        client: MockClient(h),
+        endpoints: endpoints ?? const ['https://a.example/api', 'https://b.example/api', 'https://c.example/api'],
+        retryDelay: Duration.zero);
+    const box = Bbox(45.0, 9.0, 45.05, 9.05);
+
+    test('первый сервер недоступен — данные берутся со следующего', () async {
+      final hosts = <String>[];
+      final s = src((r) async {
+        hosts.add(r.url.host);
+        if (r.url.host == 'a.example') throw http.ClientException('Failed host lookup: a.example');
+        return http.Response(ok, 200);
+      });
+      expect((await s.fetchBox(box, {2}, CancelToken())).wayCount, 1);
+      expect(hosts, ['a.example', 'b.example']);
+    });
+
+    test('перегруженный сервер (429) пробуется повторно', () async {
+      var n = 0;
+      final s = src((r) async => ++n < 3 ? http.Response('', 429) : http.Response(ok, 200), endpoints: const ['https://a.example/api']);
+      expect((await s.fetchBox(box, {2}, CancelToken())).wayCount, 1);
+      expect(n, 3);
+    });
+
+    test('все серверы недоступны — сообщение про интернет со списком причин по каждому серверу', () async {
+      final s = src((r) async => throw http.ClientException("SocketException: Failed host lookup: '${r.url.host}'"));
+      await expectLater(
+          s.fetchBox(box, {2}, CancelToken()),
+          throwsA(isA<OverpassException>().having((e) => e.message, 'message',
+              allOf(contains('Проверьте интернет'), contains('a.example'), contains('b.example'), contains('c.example'), contains('адрес сервера не найден')))));
+    });
+
+    test('серверы отвечают ошибками — сообщение «попробуйте позже» с причинами', () async {
+      final s = src((r) async => r.url.host == 'a.example' ? http.Response('', 504) : http.Response('', 400));
+      await expectLater(
+          s.fetchBox(box, {2}, CancelToken()),
+          throwsA(isA<OverpassException>().having((e) => e.message, 'message',
+              allOf(contains('не отвечают'), contains('перегружен (504)'), contains('ответ 400')))));
+    });
+
+    test('большая область, которую не отдают целиком, делится на четыре части', () async {
+      var calls = 0;
+      final s = src((r) async {
+        calls++;
+        final q = Uri.splitQueryString(r.body)['data']!;
+        // целая область 1°×1° «слишком велика», четверти отдаются
+        return q.contains('(45.0,9.0,46.0,10.0)') ? http.Response('', 400) : http.Response(ok, 200);
+      }, endpoints: const ['https://a.example/api']);
+      final d = await s.fetchBox(const Bbox(45.0, 9.0, 46.0, 10.0), {2}, CancelToken());
+      expect(calls, 5);
+      expect(d.wayCount, 4);
+    });
+
+    test('движок возвращает понятную ошибку, а не падает', () async {
+      final s = src((r) async => throw http.ClientException('SocketException: Connection refused'));
+      final out = await engineOf(s).plan(demoStart, demoEnd);
+      expect(out.routes, isNull);
+      expect(out.error, contains('Проверьте интернет'));
+    });
   });
 
   test('отмена прерывает загрузку', () async {

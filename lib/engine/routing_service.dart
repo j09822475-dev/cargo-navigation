@@ -120,7 +120,7 @@ void _workerMain(SendPort main) {
     } on CancelledException {
       out?.send(['error', id, 'Отменено']);
     } catch (e) {
-      out?.send(['error', id, 'Ошибка: $e']);
+      out?.send(['error', id, 'Не удалось построить маршрут: $e']);
     } finally {
       tokens.remove(id);
     }
