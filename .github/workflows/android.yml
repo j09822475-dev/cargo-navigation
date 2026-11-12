@@ -35,22 +35,26 @@ jobs:
 
       - name: Ключ подписи из GitHub Secrets
         env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # один секрет: первая строка — пароль, остальное — файл ключа в base64 (см. tools/create-signing-key.sh)
+          SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::warning::Секреты подписи не заданы: APK подписан временным ключом и не обновится поверх установленного. См. README, раздел «Ключ подписи»."
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::warning::Секрет ANDROID_SIGNING_KEY не задан: APK подписан временным ключом и не обновится поверх установленного. См. README, раздел «Ключ подписи»."
             exit 0
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.jks
+          PASS="$(printf '%s\n' "$SIGNING_KEY" | head -n 1 | tr -d '\r ')"
+          echo "::add-mask::$PASS"
+          printf '%s\n' "$SIGNING_KEY" | tail -n +2 | tr -d '\r \n' | base64 -d > android/app/release.jks
           {
             echo "storeFile=release.jks"
-            echo "storePassword=$KEYSTORE_PASSWORD"
-            echo "keyAlias=$KEY_ALIAS"
-            echo "keyPassword=$KEY_PASSWORD"
+            echo "storePassword=$PASS"
+            echo "keyAlias=cargonav"
+            echo "keyPassword=$PASS"
           } > android/key.properties
+          # проверка, что ключ читается этим паролем — иначе сборка упадёт с понятной причиной
+          keytool -list -keystore android/app/release.jks -storepass "$PASS" -alias cargonav > /dev/null \
+            || { echo "::error::Секрет ANDROID_SIGNING_KEY повреждён или неполон: ключ не открывается."; exit 1; }
+          echo "Ключ подписи подключён."
 
       - name: Сборка APK
         run: flutter build apk --release --build-number=${{ github.run_number }} --build-name=1.0.${{ github.run_number }}
