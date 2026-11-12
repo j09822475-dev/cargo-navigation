@@ -333,6 +333,8 @@ class _HomePageState extends State<HomePage> {
 
   // ---------- маршрут: нижняя карточка ----------
   String _costLine(RouteData r) {
+    if (!r.costKnown) return 'Стоимость не рассчитана';
+    if (r.money <= 0 && r.tollUnknownMeters > 1) return 'Есть платный участок, цена неизвестна';
     if (r.money <= 0) return 'Без платных дорог';
     return 'Платные дороги: ${r.estimated ? '≈ ' : ''}${fmtMoney(r.money)}';
   }
@@ -507,6 +509,8 @@ class _HomePageState extends State<HomePage> {
     TurnType.sharpLeft: Icons.turn_sharp_left,
     TurnType.uturn: Icons.u_turn_left,
     TurnType.arrive: Icons.flag,
+    TurnType.roundabout: Icons.roundabout_right,
+    TurnType.ferry: Icons.directions_boat,
   };
 
   List<Widget> _steps(RouteData r) => [
@@ -521,7 +525,7 @@ class _HomePageState extends State<HomePage> {
               TextSpan(text: st.text),
               if (st.toll) const TextSpan(text: ' · платная', style: TextStyle(color: _tollOrange, fontWeight: FontWeight.w600)),
             ])),
-            subtitle: st.meters > 0 ? Text('${fmtDist(st.meters)} · лимит ${st.speed} км/ч') : null,
+            subtitle: st.meters > 0 ? Text(st.speed > 0 ? '${fmtDist(st.meters)} · лимит ${st.speed} км/ч' : fmtDist(st.meters)) : null,
           ),
       ];
 
@@ -561,7 +565,8 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
-      // знак ограничения скорости
+      // знак ограничения скорости (если лимит известен)
+      if (nav.limit > 0)
       Positioned(
         left: 14,
         bottom: 110,

@@ -1,7 +1,6 @@
 
 import '../core/geo.dart';
 import '../core/road_graph.dart';
-import 'overpass_source.dart';
 import 'road_source.dart';
 
 const demoStart = LatLon(47.002, 2.995);
@@ -33,7 +32,7 @@ WayData waysFromSpecs(List<WaySpec> specs) {
     }
     offsets.add(nodeIds.length);
   }
-  return mergeWayData([WayData(ids, infos, offsets.take(), nodeIds, lats.take(), lons.take())]);
+  return WayData(ids, infos, offsets.take(), nodeIds, lats.take(), lons.take());
 }
 
 /// Демо-сеть (в Бургундии, Франция): платная магистраль оператора APRR, бесплатное шоссе

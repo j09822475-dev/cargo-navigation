@@ -318,7 +318,7 @@ void tagRoutes(List<RouteResult> list, RouteResult main) {
   main.tags.add('best');
   fastest.tags.add('fastest');
   for (final r in list) {
-    if (r.money == 0) r.tags.add('free');
+    if (r.money == 0 && r.tollUnknownMeters <= 1) r.tags.add('free');
   }
   list.sort((a, b) => identical(a, main) ? -1 : identical(b, main) ? 1 : a.hours.compareTo(b.hours));
 }

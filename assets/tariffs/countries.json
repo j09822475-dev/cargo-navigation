@@ -140,7 +140,10 @@
       "priceEur": 6.2,
       "confirmed": false,
       "source": "https://www.tolls.eu/belgium",
-      "note": "Оплата картой; наличными 8,00, с транспондером 4,40. Сайт оператора не открылся."
+      "note": "Оплата картой; наличными 8,00, с транспондером 4,40. Сайт оператора не открылся.",
+      "refs": [
+        "R2"
+      ]
     },
     {
       "country": "NL",
@@ -151,7 +154,10 @@
       "priceEur": 2.0,
       "confirmed": false,
       "source": "https://travelinformation.eu/netherlands/toll-roads/",
-      "note": "Сайт оператора не открылся."
+      "note": "Сайт оператора не открылся.",
+      "refs": [
+        "N217"
+      ]
     },
     {
       "country": "NL",

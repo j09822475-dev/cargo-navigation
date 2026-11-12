@@ -7,7 +7,9 @@ import '../core/toll_model.dart';
 import 'demo_source.dart';
 import 'engine.dart';
 import 'open_meteo.dart';
-import 'overpass_source.dart';
+import 'online_router.dart';
+import 'osrm.dart';
+import 'valhalla.dart';
 import 'road_source.dart';
 import 'tariff_assets.dart';
 
@@ -15,11 +17,15 @@ import 'tariff_assets.dart';
 typedef PlanFn = Future<PlanOutcome> Function(LatLon start, LatLon end, bool demo, Progress? onProgress);
 
 /// Движки для настоящих и демо-данных на общих встроенных данных.
-(RoutingEngine real, RoutingEngine demo) buildEngines(EngineAssets a) {
+/// Настоящие маршруты — через серверы маршрутов (Valhalla, запасной OSRM); демо — локальный граф без интернета.
+(RoutePlanner real, RoutePlanner demo) buildEngines(EngineAssets a) {
   final countries = CountryIndex.parse(a.countriesGeo);
   final tolls = TollModel.parse(a.countryTolls, a.operatorFiles);
   return (
-    RoutingEngine(OverpassSource(), countries: countries, tolls: tolls, weather: OpenMeteoSource()),
+    () {
+      final osrm = OsrmProvider();
+      return OnlineRouter([ValhallaProvider(), osrm], guide: osrm, countries: countries, tolls: tolls, weather: OpenMeteoSource());
+    }(),
     RoutingEngine(DemoSource(), countries: countries, tolls: tolls),
   );
 }
@@ -83,7 +89,7 @@ void _workerMain(SendPort main) {
   final port = ReceivePort();
   main.send(port.sendPort);
   SendPort? out;
-  RoutingEngine? real, demo;
+  RoutePlanner? real, demo;
   final tokens = <int, CancelToken>{};
   port.listen((m) async {
     final msg = m as dynamic;

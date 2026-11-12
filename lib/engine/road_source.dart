@@ -21,7 +21,7 @@ class Bbox {
   String toString() => '$south,$west,$north,$east';
 }
 
-/// Источник данных о дорогах (в приложении — Overpass API, в тестах — синтетическая сеть).
+/// Источник данных о дорогах для локального графа (демо-сеть, в тестах — синтетическая сеть).
 abstract class RoadSource {
   Future<WayData> fetchBox(Bbox box, Set<int> classes, CancelToken cancel);
 

@@ -5,7 +5,52 @@ import 'prefs.dart';
 import 'road_graph.dart';
 import 'router.dart';
 
-enum TurnType { depart, straight, slightRight, slightLeft, right, left, sharpRight, sharpLeft, uturn, arrive }
+enum TurnType { depart, straight, slightRight, slightLeft, right, left, sharpRight, sharpLeft, uturn, arrive, roundabout, ferry }
+
+/// Тип манёвра Valhalla → значок/действие.
+TurnType turnTypeOfValhalla(int t) {
+  switch (t) {
+    case 1:
+    case 2:
+    case 3:
+      return TurnType.depart;
+    case 4:
+    case 5:
+    case 6:
+      return TurnType.arrive;
+    case 9:
+    case 18:
+    case 20:
+    case 23:
+    case 37:
+      return TurnType.slightRight;
+    case 10:
+      return TurnType.right;
+    case 11:
+      return TurnType.sharpRight;
+    case 12:
+    case 13:
+      return TurnType.uturn;
+    case 14:
+      return TurnType.sharpLeft;
+    case 15:
+      return TurnType.left;
+    case 16:
+    case 19:
+    case 21:
+    case 24:
+    case 38:
+      return TurnType.slightLeft;
+    case 26:
+    case 27:
+      return TurnType.roundabout;
+    case 28:
+    case 29:
+      return TurnType.ferry;
+    default:
+      return TurnType.straight;
+  }
+}
 
 class Step {
   final TurnType type;
@@ -40,7 +85,11 @@ class RouteData {
   final List<Step> steps;
   const RouteData(this.tags, this.hours, this.weatherDelayHours, this.meters, this.distanceToll, this.tollMeters,
       this.tollOperatorMeters, this.tollUnknownMeters, this.vignettes, this.objects, this.warnings, this.pts, this.edgeStartPt,
-      this.edgeSpeed, this.edgeToll, this.steps);
+      this.edgeSpeed, this.edgeToll, this.steps,
+      {this.costKnown = true});
+
+  /// false — у сервера маршрутов нет данных о платных дорогах, стоимость не посчитана.
+  final bool costKnown;
 
   double get vignetteCost => vignettes.fold(0.0, (s, v) => s + v.priceEur);
 

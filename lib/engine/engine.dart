@@ -9,6 +9,7 @@ import '../core/router.dart';
 import '../core/toll_model.dart';
 import '../core/weather.dart';
 import 'road_source.dart';
+import 'spine.dart';
 
 class PlanOutcome {
   final List<RouteData>? routes;
@@ -28,7 +29,12 @@ typedef Progress = void Function(String message);
 ///   коридор вокруг найденного маршрута с дорогами помельче и повторный расчёт.
 /// * Дороги в странах вне ЕС отбрасываются при построении графа.
 /// * Погода вдоль маршрутов снижает расчётную скорость и может поменять выбор основного маршрута.
-class RoutingEngine {
+/// Построитель маршрутов (онлайн-сервер или локальный граф для демо).
+abstract class RoutePlanner {
+  Future<PlanOutcome> plan(LatLon start, LatLon end, {Progress? onProgress, CancelToken? cancel});
+}
+
+class RoutingEngine implements RoutePlanner {
   final RoadSource source;
   final CountryIndex countries;
   TollModel tolls;
@@ -51,6 +57,7 @@ class RoutingEngine {
   static String _r(LatLon p) => '${p.lat.toStringAsFixed(4)},${p.lon.toStringAsFixed(4)}';
   static final _all = {for (var i = 0; i < roadClasses.length; i++) i};
 
+  @override
   Future<PlanOutcome> plan(LatLon start, LatLon end, {Progress? onProgress, CancelToken? cancel}) async {
     final token = cancel ?? CancelToken();
     final d = haversine(start.lat, start.lon, end.lat, end.lon);
@@ -172,7 +179,7 @@ class RoutingEngine {
       out.add(buildRouteData(ctx, r, hours: hours[i], warnings: w2, tags: {
         if (i == main) 'best',
         if (i == fastest) 'fastest',
-        if (r.money == 0) 'free',
+        if (r.money == 0 && r.tollUnknownMeters <= 1) 'free',
       }));
     }
     return PlanOutcome(routes: out, distanceKm: km, note: note);
@@ -260,64 +267,8 @@ class RoutingEngine {
     return chunks;
   }
 
-  /// Опорная линия A→B: большой круг, а если он задевает страны вне ЕС или море —
-  /// путь по сетке 0,25° в обход стран вне ЕС (море проходимо, но «дорого»).
-  List<LatLon> spine(LatLon a, LatLon b) {
-    final gc = greatCirclePoints(a, b, spineStepMeters);
-    if (countries.isEmpty) return gc;
-    bool offEu(LatLon p) {
-      final c = countries.countryAt(p.lat, p.lon);
-      return c < 0 || !countries.eu[c];
-    }
-
-    if (!gc.sublist(1, gc.length - 1).any(offEu)) return gc;
-    const cell = 0.25;
-    const w = 308, hgt = 180; // рамка Европы в ячейках
-    int ix(double lon) => ((lon - CountryIndex.minLon) / cell).floor().clamp(0, w - 1);
-    int iy(double lat) => ((lat - CountryIndex.minLat) / cell).floor().clamp(0, hgt - 1);
-    double clat(int y) => CountryIndex.minLat + (y + 0.5) * cell;
-    double clon(int x) => CountryIndex.minLon + (x + 0.5) * cell;
-    final s = iy(a.lat) * w + ix(a.lon), t = iy(b.lat) * w + ix(b.lon);
-    final kind = <int, int>{}; // 0 — ЕС, 1 — море, 2 — вне ЕС
-    int kindOf(int id) => kind.putIfAbsent(id, () {
-          if (id == s || id == t) return 0;
-          final c = countries.countryAt(clat(id ~/ w), clon(id % w));
-          return c < 0 ? 1 : (countries.eu[c] ? 0 : 2);
-        });
-    final dist = <int, double>{s: 0};
-    final prev = <int, int>{};
-    final heap = MinHeap()..push(0, s);
-    final done = <int>{};
-    while (heap.size > 0) {
-      final u = heap.pop();
-      if (!done.add(u)) continue;
-      if (u == t) break;
-      final ux = u % w, uy = u ~/ w;
-      for (var dy = -1; dy <= 1; dy++) {
-        for (var dx = -1; dx <= 1; dx++) {
-          if (dx == 0 && dy == 0) continue;
-          final vx = ux + dx, vy = uy + dy;
-          if (vx < 0 || vy < 0 || vx >= w || vy >= hgt) continue;
-          final v = vy * w + vx;
-          final k = kindOf(v);
-          if (k == 2) continue;
-          final step = haversine(clat(uy), clon(ux), clat(vy), clon(vx)) * (k == 1 ? 4 : 1);
-          final nd = dist[u]! + step;
-          if (nd < (dist[v] ?? double.infinity)) {
-            dist[v] = nd;
-            prev[v] = u;
-            heap.push(nd + haversine(clat(vy), clon(vx), b.lat, b.lon), v);
-          }
-        }
-      }
-    }
-    if (!prev.containsKey(t) && s != t) return gc;
-    final cells = <int>[];
-    for (int? c = t; c != null && c != s; c = prev[c]) {
-      cells.add(c);
-    }
-    return [a, for (final c in cells.reversed) if (c != t) LatLon(clat(c ~/ w), clon(c % w)), b];
-  }
+  /// Опорная линия A→B по странам ЕС (см. [euSpine]).
+  List<LatLon> spine(LatLon a, LatLon b) => euSpine(countries, a, b, stepMeters: spineStepMeters);
 
   Future<void> _fetchCorridor(String key, List<LatLon> line, double radius, Set<int> classes, double chunk, String what,
       Progress? progress, CancelToken cancel) async {
